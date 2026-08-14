@@ -63,6 +63,7 @@ func TestMain(m *testing.M) {
 	for _, name := range []string{
 		"OPENAI_MODEL",
 		"OPENAI_API_KEY",
+		"OPENAI_API_KEY_ENV",
 		"OPENAI_BASE_URL",
 		"BASETION_SESSION_DIR",
 		"BASETION_MAX_ITERATIONS",
@@ -77,7 +78,7 @@ func TestMain(m *testing.M) {
 	path := filepath.Join(dir, "config.toml")
 	contents := []byte(`[openai]
 model = "test-model"
-api_key = "test-key"
+api_key_env = "BASETION_TEST_OPENAI_API_KEY"
 
 [agent]
 max_iterations = 4
@@ -85,10 +86,24 @@ max_iterations = 4
 	if err := os.WriteFile(path, contents, 0o600); err != nil {
 		panic(err)
 	}
+	if err := os.Setenv("BASETION_TEST_OPENAI_API_KEY", "test-key"); err != nil {
+		panic(err)
+	}
+	workingDir, err := os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		panic(err)
+	}
 	if err := appconfig.InitFile(path); err != nil {
 		panic(err)
 	}
+	if err := os.Chdir(workingDir); err != nil {
+		panic(err)
+	}
 	code := m.Run()
+	_ = os.Unsetenv("BASETION_TEST_OPENAI_API_KEY")
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
 }

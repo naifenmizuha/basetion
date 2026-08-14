@@ -21,11 +21,12 @@ Basetion 是一个以 Go 和 CloudWeGo Eino ADK 为核心的 Agent 应用骨架�
 
 ```shell
 cp config/config.example.toml config/config.toml
+cp .env.example .env
 ```
 
-程序固定从当前工作目录读取 `config/config.toml`。配置按 `[openai]`、`[session]` 和 `[agent]` 分组；`openai.model` 与 `openai.api_key` 必填。实际配置文件可能包含密钥，已被 Git 忽略，请勿提交。
+程序固定从当前工作目录读取 `config/config.toml`，并在存在时读取当前工作目录下的 `.env`。配置按 `[openai]`、`[session]` 和 `[agent]` 分组；`openai.model` 与 `openai.api_key_env` 必填。`api_key_env` 保存 API Key 所在环境变量的名称，默认示例使用 `OPENAI_API_KEY`，真实密钥只写入被 Git 忽略的 `.env` 或进程环境，不写入 TOML。
 
-现有环境变量仍受支持并优先于 TOML 中的对应值：`OPENAI_MODEL`、`OPENAI_API_KEY`、`OPENAI_BASE_URL`、`BASETION_SESSION_DIR`、`BASETION_MAX_ITERATIONS`、`BASETION_UNSAFE_DEBUG_DATA`。建议使用 `OPENAI_API_KEY` 注入密钥，例如：
+进程环境变量优先于 `.env`，二者都优先于 TOML 中的对应值。配置覆盖支持 `OPENAI_MODEL`、`OPENAI_API_KEY_ENV`、`OPENAI_BASE_URL`、`BASETION_SESSION_DIR`、`BASETION_MAX_ITERATIONS` 和 `BASETION_UNSAFE_DEBUG_DATA`；`OPENAI_API_KEY_ENV` 用于改写 `api_key_env` 指向的变量名。也可以不创建 `.env`，直接由进程环境提供密钥，例如：
 
 ```shell
 export OPENAI_API_KEY=your-api-key

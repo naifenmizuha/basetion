@@ -7,13 +7,13 @@
 
 ## 配置
 
-配置使用 Viper 从进程当前工作目录下的 `config/config.toml` 读取，文件不存在、TOML 无法解析或字段校验失败时启动终止。配置分为三个职责组：
+配置使用 Viper 从进程当前工作目录下的 `config/config.toml` 读取，并使用 gotenv 可选解析进程当前工作目录下的 `.env`。`.env` 不存在时继续启动；文件无法读取或格式错误、TOML 不存在或无法解析、字段校验失败时启动终止。配置分为三个职责组：
 
-- `openai.model`、`openai.api_key` 必填，`openai.base_url` 可选。
+- `openai.model`、`openai.api_key_env` 必填，`openai.base_url` 可选。`api_key_env` 保存提供真实 API Key 的环境变量名称；该变量不存在或值为空时配置无效，真实密钥不从 TOML 解码。
 - `session.dir` 默认 `.basetion/sessions`。
 - `agent.max_iterations` 默认 20，必须为正整数；`agent.unsafe_debug_data` 默认关闭。
 
-`OPENAI_MODEL`、`OPENAI_API_KEY`、`OPENAI_BASE_URL`、`BASETION_SESSION_DIR`、`BASETION_MAX_ITERATIONS` 和 `BASETION_UNSAFE_DEBUG_DATA` 显式绑定到相应键，并优先于文件值。`config/config.example.toml` 提供无密钥模板；实际 `config/config.toml` 被 Git 忽略。
+进程环境变量优先于 `.env`，两者都优先于 TOML。`OPENAI_MODEL`、`OPENAI_API_KEY_ENV`、`OPENAI_BASE_URL`、`BASETION_SESSION_DIR`、`BASETION_MAX_ITERATIONS` 和 `BASETION_UNSAFE_DEBUG_DATA` 覆盖相应配置键；解析 `api_key_env` 后，再按同样的进程环境优先规则读取它指定的 API Key。`config/config.example.toml` 与 `.env.example` 提供无密钥模板；实际 `config/config.toml` 和 `.env` 被 Git 忽略。
 
 `Init` 只允许一次初始化尝试，成功后发布进程级只读配置快照；`InitFile` 允许测试从隔离路径初始化。`Get` 返回配置值副本，初始化成功前调用会 panic。配置不支持运行时修改或热加载。`Validate` 汇总多个配置问题；`DiagnosticFields` 不包含 API Key。
 

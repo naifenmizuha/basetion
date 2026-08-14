@@ -11,7 +11,7 @@ import (
 
 const validTOML = `[openai]
 model = "gpt-from-file"
-api_key = "file-secret"
+api_key_env = "TEST_OPENAI_API_KEY"
 base_url = "https://file.invalid/v1"
 
 [session]
@@ -31,15 +31,33 @@ func writeConfig(t *testing.T, contents string) string {
 	return path
 }
 
+func writeDotEnv(t *testing.T, contents string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func loadWithoutDotEnv(t *testing.T, contents string) (Config, error) {
+	t.Helper()
+	return loadFiles(writeConfig(t, contents), filepath.Join(t.TempDir(), "missing.env"))
+}
+
 func clearConfigEnvironment(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{
 		"OPENAI_MODEL",
 		"OPENAI_API_KEY",
+		"OPENAI_API_KEY_ENV",
 		"OPENAI_BASE_URL",
 		"BASETION_SESSION_DIR",
 		"BASETION_MAX_ITERATIONS",
 		"BASETION_UNSAFE_DEBUG_DATA",
+		"TEST_OPENAI_API_KEY",
+		"ENV_OPENAI_API_KEY",
+		"DOTENV_OPENAI_API_KEY",
 	} {
 		value, existed := os.LookupEnv(name)
 		if err := os.Unsetenv(name); err != nil {
@@ -57,12 +75,13 @@ func clearConfigEnvironment(t *testing.T) {
 
 func TestLoadFile(t *testing.T) {
 	clearConfigEnvironment(t)
+	t.Setenv("TEST_OPENAI_API_KEY", "file-secret")
 
-	cfg, err := loadFile(writeConfig(t, validTOML))
+	cfg, err := loadWithoutDotEnv(t, validTOML)
 	if err != nil {
 		t.Fatalf("loadFile() error = %v", err)
 	}
-	if cfg.OpenAI.Model != "gpt-from-file" || cfg.OpenAI.APIKey != "file-secret" || cfg.OpenAI.BaseURL != "https://file.invalid/v1" {
+	if cfg.OpenAI.Model != "gpt-from-file" || cfg.OpenAI.APIKeyEnv != "TEST_OPENAI_API_KEY" || cfg.OpenAI.APIKey != "file-secret" || cfg.OpenAI.BaseURL != "https://file.invalid/v1" {
 		t.Fatalf("unexpected OpenAI config: %#v", cfg.OpenAI)
 	}
 	if cfg.Session.Dir != "/tmp/file-sessions" || cfg.Agent.MaxIterations != 7 || !cfg.Agent.UnsafeDebugData {
@@ -75,12 +94,13 @@ func TestLoadFile(t *testing.T) {
 
 func TestLoadFileDefaults(t *testing.T) {
 	clearConfigEnvironment(t)
-	path := writeConfig(t, `[openai]
+	t.Setenv("TEST_OPENAI_API_KEY", "secret")
+	contents := `[openai]
 model = "gpt-defaults"
-api_key = "secret"
-`)
+api_key_env = "TEST_OPENAI_API_KEY"
+`
 
-	cfg, err := loadFile(path)
+	cfg, err := loadWithoutDotEnv(t, contents)
 	if err != nil {
 		t.Fatalf("loadFile() error = %v", err)
 	}
@@ -92,17 +112,18 @@ api_key = "secret"
 func TestEnvironmentOverridesFile(t *testing.T) {
 	clearConfigEnvironment(t)
 	t.Setenv("OPENAI_MODEL", "gpt-from-env")
-	t.Setenv("OPENAI_API_KEY", "env-secret")
+	t.Setenv("OPENAI_API_KEY_ENV", "ENV_OPENAI_API_KEY")
+	t.Setenv("ENV_OPENAI_API_KEY", "env-secret")
 	t.Setenv("OPENAI_BASE_URL", "https://env.invalid/v1")
 	t.Setenv("BASETION_SESSION_DIR", "/tmp/env-sessions")
 	t.Setenv("BASETION_MAX_ITERATIONS", "11")
 	t.Setenv("BASETION_UNSAFE_DEBUG_DATA", "false")
 
-	cfg, err := loadFile(writeConfig(t, validTOML))
+	cfg, err := loadWithoutDotEnv(t, validTOML)
 	if err != nil {
 		t.Fatalf("loadFile() error = %v", err)
 	}
-	if cfg.OpenAI.Model != "gpt-from-env" || cfg.OpenAI.APIKey != "env-secret" || cfg.OpenAI.BaseURL != "https://env.invalid/v1" {
+	if cfg.OpenAI.Model != "gpt-from-env" || cfg.OpenAI.APIKeyEnv != "ENV_OPENAI_API_KEY" || cfg.OpenAI.APIKey != "env-secret" || cfg.OpenAI.BaseURL != "https://env.invalid/v1" {
 		t.Fatalf("environment did not override OpenAI config: %#v", cfg.OpenAI)
 	}
 	if cfg.Session.Dir != "/tmp/env-sessions" || cfg.Agent.MaxIterations != 11 || cfg.Agent.UnsafeDebugData {
@@ -110,21 +131,81 @@ func TestEnvironmentOverridesFile(t *testing.T) {
 	}
 }
 
+func TestDotEnvProvidesConfigurationAndAPIKey(t *testing.T) {
+	clearConfigEnvironment(t)
+	dotenvPath := writeDotEnv(t, `OPENAI_MODEL=gpt-from-dotenv
+OPENAI_API_KEY_ENV=DOTENV_OPENAI_API_KEY
+DOTENV_OPENAI_API_KEY=dotenv-secret
+OPENAI_BASE_URL=https://dotenv.invalid/v1
+BASETION_SESSION_DIR=/tmp/dotenv-sessions
+BASETION_MAX_ITERATIONS=13
+BASETION_UNSAFE_DEBUG_DATA=true
+`)
+
+	cfg, err := loadFiles(writeConfig(t, validTOML), dotenvPath)
+	if err != nil {
+		t.Fatalf("loadFiles() error = %v", err)
+	}
+	if cfg.OpenAI.Model != "gpt-from-dotenv" || cfg.OpenAI.APIKeyEnv != "DOTENV_OPENAI_API_KEY" || cfg.OpenAI.APIKey != "dotenv-secret" || cfg.OpenAI.BaseURL != "https://dotenv.invalid/v1" {
+		t.Fatalf(".env did not provide OpenAI config: %#v", cfg.OpenAI)
+	}
+	if cfg.Session.Dir != "/tmp/dotenv-sessions" || cfg.Agent.MaxIterations != 13 || !cfg.Agent.UnsafeDebugData {
+		t.Fatalf(".env did not provide config: %#v", cfg)
+	}
+}
+
+func TestProcessEnvironmentOverridesDotEnv(t *testing.T) {
+	clearConfigEnvironment(t)
+	t.Setenv("OPENAI_MODEL", "gpt-from-process")
+	t.Setenv("OPENAI_API_KEY_ENV", "ENV_OPENAI_API_KEY")
+	t.Setenv("ENV_OPENAI_API_KEY", "process-secret")
+	dotenvPath := writeDotEnv(t, `OPENAI_MODEL=gpt-from-dotenv
+OPENAI_API_KEY_ENV=DOTENV_OPENAI_API_KEY
+ENV_OPENAI_API_KEY=dotenv-secret
+DOTENV_OPENAI_API_KEY=other-dotenv-secret
+`)
+
+	cfg, err := loadFiles(writeConfig(t, validTOML), dotenvPath)
+	if err != nil {
+		t.Fatalf("loadFiles() error = %v", err)
+	}
+	if cfg.OpenAI.Model != "gpt-from-process" || cfg.OpenAI.APIKeyEnv != "ENV_OPENAI_API_KEY" || cfg.OpenAI.APIKey != "process-secret" {
+		t.Fatalf("process environment did not override .env: %#v", cfg.OpenAI)
+	}
+}
+
+func TestDotEnvIsOptionalAndMalformedFileFails(t *testing.T) {
+	clearConfigEnvironment(t)
+	t.Setenv("TEST_OPENAI_API_KEY", "process-secret")
+	if _, err := loadWithoutDotEnv(t, validTOML); err != nil {
+		t.Fatalf("missing .env error = %v", err)
+	}
+
+	malformed := writeDotEnv(t, "not valid dotenv syntax\n")
+	if _, err := loadFiles(writeConfig(t, validTOML), malformed); err == nil || !strings.Contains(err.Error(), "read environment file") {
+		t.Fatalf("malformed .env error = %v", err)
+	}
+	if _, err := loadFiles(writeConfig(t, validTOML), t.TempDir()); err == nil || !strings.Contains(err.Error(), "read environment file") {
+		t.Fatalf("unreadable .env error = %v", err)
+	}
+}
+
 func TestLoadFileRejectsMissingAndInvalidFiles(t *testing.T) {
 	clearConfigEnvironment(t)
 
-	if _, err := loadFile(filepath.Join(t.TempDir(), "missing.toml")); err == nil || !strings.Contains(err.Error(), "read configuration file") {
+	missingEnv := filepath.Join(t.TempDir(), "missing.env")
+	if _, err := loadFiles(filepath.Join(t.TempDir(), "missing.toml"), missingEnv); err == nil || !strings.Contains(err.Error(), "read configuration file") {
 		t.Fatalf("missing file error = %v", err)
 	}
-	if _, err := loadFile(writeConfig(t, "[openai\nmodel =")); err == nil || !strings.Contains(err.Error(), "read configuration file") {
+	if _, err := loadWithoutDotEnv(t, "[openai\nmodel ="); err == nil || !strings.Contains(err.Error(), "read configuration file") {
 		t.Fatalf("invalid TOML error = %v", err)
 	}
 	invalidInteger := strings.Replace(validTOML, "max_iterations = 7", `max_iterations = "nope"`, 1)
-	if _, err := loadFile(writeConfig(t, invalidInteger)); err == nil || !strings.Contains(err.Error(), "decode configuration file") {
+	if _, err := loadWithoutDotEnv(t, invalidInteger); err == nil || !strings.Contains(err.Error(), "decode configuration file") {
 		t.Fatalf("invalid integer error = %v", err)
 	}
 	invalidBoolean := strings.Replace(validTOML, "unsafe_debug_data = true", `unsafe_debug_data = "nope"`, 1)
-	if _, err := loadFile(writeConfig(t, invalidBoolean)); err == nil || !strings.Contains(err.Error(), "decode configuration file") {
+	if _, err := loadWithoutDotEnv(t, invalidBoolean); err == nil || !strings.Contains(err.Error(), "decode configuration file") {
 		t.Fatalf("invalid boolean error = %v", err)
 	}
 }
@@ -132,16 +213,18 @@ func TestLoadFileRejectsMissingAndInvalidFiles(t *testing.T) {
 func TestLoadFileRejectsInvalidEnvironmentTypes(t *testing.T) {
 	t.Run("integer", func(t *testing.T) {
 		clearConfigEnvironment(t)
+		t.Setenv("TEST_OPENAI_API_KEY", "secret")
 		t.Setenv("BASETION_MAX_ITERATIONS", "nope")
-		if _, err := loadFile(writeConfig(t, validTOML)); err == nil || !strings.Contains(err.Error(), "decode configuration file") {
+		if _, err := loadWithoutDotEnv(t, validTOML); err == nil || !strings.Contains(err.Error(), "decode configuration file") {
 			t.Fatalf("invalid environment integer error = %v", err)
 		}
 	})
 
 	t.Run("boolean", func(t *testing.T) {
 		clearConfigEnvironment(t)
+		t.Setenv("TEST_OPENAI_API_KEY", "secret")
 		t.Setenv("BASETION_UNSAFE_DEBUG_DATA", "nope")
-		if _, err := loadFile(writeConfig(t, validTOML)); err == nil || !strings.Contains(err.Error(), "decode configuration file") {
+		if _, err := loadWithoutDotEnv(t, validTOML); err == nil || !strings.Contains(err.Error(), "decode configuration file") {
 			t.Fatalf("invalid environment boolean error = %v", err)
 		}
 	})
@@ -149,20 +232,62 @@ func TestLoadFileRejectsInvalidEnvironmentTypes(t *testing.T) {
 
 func TestLoadFileRejectsMissingRequiredValues(t *testing.T) {
 	clearConfigEnvironment(t)
-	path := writeConfig(t, `[openai]
+	contents := `[openai]
 model = ""
-api_key = ""
-`)
+api_key_env = ""
+`
 
-	_, err := loadFile(path)
-	if err == nil || !strings.Contains(err.Error(), "openai.model") || !strings.Contains(err.Error(), "openai.api_key") {
+	_, err := loadWithoutDotEnv(t, contents)
+	if err == nil || !strings.Contains(err.Error(), "openai.model") || !strings.Contains(err.Error(), "openai.api_key_env") {
 		t.Fatalf("required values error = %v", err)
+	}
+}
+
+func TestLoadFileRejectsMissingAPIKeyEnvironmentValue(t *testing.T) {
+	clearConfigEnvironment(t)
+
+	_, err := loadWithoutDotEnv(t, validTOML)
+	if err == nil || !strings.Contains(err.Error(), "TEST_OPENAI_API_KEY") || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("missing API key environment error = %v", err)
+	}
+
+	t.Setenv("TEST_OPENAI_API_KEY", "   ")
+	_, err = loadWithoutDotEnv(t, validTOML)
+	if err == nil || !strings.Contains(err.Error(), "TEST_OPENAI_API_KEY") {
+		t.Fatalf("blank API key environment error = %v", err)
+	}
+}
+
+func TestLoadFileRejectsLegacyAPIKeyField(t *testing.T) {
+	clearConfigEnvironment(t)
+	contents := strings.Replace(validTOML, `api_key_env = "TEST_OPENAI_API_KEY"`, `api_key = "legacy-secret"`, 1)
+
+	_, err := loadWithoutDotEnv(t, contents)
+	if err == nil || !strings.Contains(err.Error(), "decode configuration file") || !strings.Contains(err.Error(), "api_key") || strings.Contains(err.Error(), "legacy-secret") {
+		t.Fatalf("legacy api_key error = %v", err)
 	}
 }
 
 func TestInitFilePublishesImmutableSnapshotOnce(t *testing.T) {
 	clearConfigEnvironment(t)
-	path := writeConfig(t, validTOML)
+	t.Setenv("TEST_OPENAI_API_KEY", "file-secret")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte(validTOML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	workingDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(workingDir); err != nil {
+			t.Errorf("restore working directory: %v", err)
+		}
+	})
 
 	if err := InitFile(path); err != nil {
 		t.Fatalf("InitFile() error = %v", err)

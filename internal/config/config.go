@@ -3,14 +3,17 @@ package config
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
 	"github.com/spf13/viper"
+	"github.com/subosito/gotenv"
 )
 
 const (
 	defaultConfigFile    = "config/config.toml"
+	defaultEnvFile       = ".env"
 	defaultSessionDir    = ".basetion/sessions"
 	defaultMaxIterations = 20
 )
@@ -26,9 +29,10 @@ type Config struct {
 }
 
 type OpenAIConfig struct {
-	Model   string `mapstructure:"model"`
-	APIKey  string `mapstructure:"api_key"`
-	BaseURL string `mapstructure:"base_url"`
+	Model     string `mapstructure:"model"`
+	APIKeyEnv string `mapstructure:"api_key_env"`
+	APIKey    string `mapstructure:"-"`
+	BaseURL   string `mapstructure:"base_url"`
 }
 
 type SessionConfig struct {
@@ -48,7 +52,8 @@ var global = struct {
 	err         error
 }{}
 
-// Init loads the process configuration from config/config.toml.
+// Init loads the process configuration from config/config.toml and optionally
+// reads environment values from .env in the current working directory.
 func Init() error {
 	return InitFile(defaultConfigFile)
 }
@@ -90,8 +95,17 @@ func Get() Config {
 }
 
 func loadFile(path string) (Config, error) {
+	return loadFiles(path, defaultEnvFile)
+}
+
+func loadFiles(configPath, envPath string) (Config, error) {
+	dotenv, err := readDotEnv(envPath)
+	if err != nil {
+		return Config{}, err
+	}
+
 	v := viper.New()
-	v.SetConfigFile(path)
+	v.SetConfigFile(configPath)
 	v.SetConfigType("toml")
 	v.SetDefault("session.dir", defaultSessionDir)
 	v.SetDefault("agent.max_iterations", defaultMaxIterations)
@@ -99,34 +113,58 @@ func loadFile(path string) (Config, error) {
 
 	environment := map[string]string{
 		"openai.model":            "OPENAI_MODEL",
-		"openai.api_key":          "OPENAI_API_KEY",
+		"openai.api_key_env":      "OPENAI_API_KEY_ENV",
 		"openai.base_url":         "OPENAI_BASE_URL",
 		"session.dir":             "BASETION_SESSION_DIR",
 		"agent.max_iterations":    "BASETION_MAX_ITERATIONS",
 		"agent.unsafe_debug_data": "BASETION_UNSAFE_DEBUG_DATA",
 	}
 	for key, name := range environment {
-		if err := v.BindEnv(key, name); err != nil {
-			return Config{}, fmt.Errorf("bind environment variable %s: %w", name, err)
+		if value, ok := lookupEnvironment(name, dotenv); ok {
+			v.Set(key, value)
 		}
 	}
 
 	if err := v.ReadInConfig(); err != nil {
-		return Config{}, fmt.Errorf("read configuration file %q: %w", path, err)
+		return Config{}, fmt.Errorf("read configuration file %q: %w", configPath, err)
 	}
 
 	var cfg Config
 	if err := v.UnmarshalExact(&cfg); err != nil {
-		return Config{}, fmt.Errorf("decode configuration file %q: %w", path, err)
+		return Config{}, fmt.Errorf("decode configuration file %q: %w", configPath, err)
 	}
 	cfg.OpenAI.Model = strings.TrimSpace(cfg.OpenAI.Model)
-	cfg.OpenAI.APIKey = strings.TrimSpace(cfg.OpenAI.APIKey)
+	cfg.OpenAI.APIKeyEnv = strings.TrimSpace(cfg.OpenAI.APIKeyEnv)
 	cfg.OpenAI.BaseURL = strings.TrimSpace(cfg.OpenAI.BaseURL)
 	cfg.Session.Dir = strings.TrimSpace(cfg.Session.Dir)
+	if cfg.OpenAI.APIKeyEnv != "" {
+		if apiKey, ok := lookupEnvironment(cfg.OpenAI.APIKeyEnv, dotenv); ok {
+			cfg.OpenAI.APIKey = strings.TrimSpace(apiKey)
+		}
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+func readDotEnv(path string) (gotenv.Env, error) {
+	environment, err := gotenv.Read(path)
+	if err == nil {
+		return environment, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return gotenv.Env{}, nil
+	}
+	return nil, fmt.Errorf("read environment file %q: %w", path, err)
+}
+
+func lookupEnvironment(name string, dotenv gotenv.Env) (string, bool) {
+	if value, ok := os.LookupEnv(name); ok {
+		return value, true
+	}
+	value, ok := dotenv[name]
+	return value, ok
 }
 
 // Validate verifies required model and storage configuration.
@@ -135,8 +173,13 @@ func (c Config) Validate() error {
 	if c.OpenAI.Model == "" {
 		problems = append(problems, errors.New("openai.model (OPENAI_MODEL) is required"))
 	}
+	if c.OpenAI.APIKeyEnv == "" {
+		problems = append(problems, errors.New("openai.api_key_env (OPENAI_API_KEY_ENV) is required"))
+	}
 	if c.OpenAI.APIKey == "" {
-		problems = append(problems, errors.New("openai.api_key (OPENAI_API_KEY) is required"))
+		if c.OpenAI.APIKeyEnv != "" {
+			problems = append(problems, fmt.Errorf("environment variable %q referenced by openai.api_key_env is required", c.OpenAI.APIKeyEnv))
+		}
 	}
 	if c.Session.Dir == "" {
 		problems = append(problems, errors.New("session.dir (BASETION_SESSION_DIR) must not be empty"))
