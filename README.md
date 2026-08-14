@@ -6,14 +6,14 @@ Basetion 是一个以 Go 和 CloudWeGo Eino ADK 为核心的 Agent 应用骨架�
 
 代码按六个职责区域组织，依赖方向始终从外向内：
 
-1. `internal/entry/cli`：解析入口协议并渲染 Eino AgentEvent，不承载业务规则。
-2. `internal/application/conversation`：管理业务 Session、并发锁和一轮对话的事务边界。
-3. `internal/harness`：用 Eino `AgenticModel`、`TypedChatModelAgent[*schema.AgenticMessage]`、工具与 `TypedRunner` 编排 Agent 运行。
-4. `internal/tools`：把模型工具协议适配到领域服务，校验并转换工具输入输出。
-5. `internal/domain`：表达知识检索和 TeamOps 只读程序查询等领域能力，只依赖抽象接口。
-6. `internal/infra`：实现本地 Session 文件、内存检索器和受限 Lua 查询运行时；将来可替换为数据库、向量库或真实 TeamOps SDK 适配器。
+1. `src/internal/entry/cli`：解析入口协议并渲染 Eino AgentEvent，不承载业务规则。
+2. `src/internal/application/conversation`：管理业务 Session、并发锁和一轮对话的事务边界。
+3. `src/internal/harness`：用 Eino `AgenticModel`、Skill Middleware、工具与 `TypedRunner` 编排 Agent 运行。
+4. `src/internal/tools`：把模型工具协议适配到领域服务，校验并转换工具输入输出。
+5. `src/internal/domain`：表达 TeamOps 只读程序查询等领域能力，只依赖抽象接口。
+6. `src/internal/infra`：实现本地 Session 文件和受限 Lua 查询运行时；将来可替换为数据库或真实 TeamOps SDK 适配器。
 
-入口只调用会话应用服务；会话服务使用 Eino Runner，但不理解模型或工具内部实现；Harness 调用工具；工具只调用领域服务；基础设施实现应用层或领域层定义的接口。智能匹配已有上下文若属于一次 Agent 运行策略，应放在 Harness；若决定业务 Session 中哪些历史可见，则由会话应用层制定策略、Harness 执行。
+入口只调用会话应用服务；会话服务使用 Eino Runner，但不理解模型、Skill 或工具内部实现；Harness 按需加载仓库根目录 `skills/` 下的项目知识与 TeamOps 操作说明，并调用工具；工具只调用领域服务；基础设施实现应用层或领域层定义的接口。Skill 说明“怎么做”，TeamOps 工具和领域服务提供并约束“能做什么”。
 
 ## 运行 CLI
 
@@ -35,11 +35,13 @@ export OPENAI_API_KEY=your-api-key
 运行一轮并在下一轮复用同一 Session：
 
 ```shell
-go run ./cmd/basetion --session-id demo "介绍一下这个项目的骨架"
-go run ./cmd/basetion --session-id demo "继续说明会话层"
+go run ./src/cmd/basetion --session-id demo "介绍一下这个项目的骨架"
+go run ./src/cmd/basetion --session-id demo "继续说明会话层"
 ```
 
 CLI 会依次显示模型明确返回的可见思考摘要、工具调用、工具结果、最终回答和完成状态。默认 Callback 日志不记录提示词、私有推理或工具完整载荷；仅在 TOML 中设置 `agent.unsafe_debug_data=true` 或显式设置 `BASETION_UNSAFE_DEBUG_DATA=true` 才会输出调试载荷，请勿在生产环境开启。
+
+`skills/` 是必需的核心运行资源。启动时会校验 `project-knowledge` 和 `manage-teamops`；目录缺失、Skill 格式错误或必需 Skill 缺失都会导致启动失败。项目知识问题按需加载 `project-knowledge`，球队结构化数据任务先加载 `manage-teamops`，再通过只读 `teamops` 工具执行。
 
 ## Session 与 Checkpoint
 

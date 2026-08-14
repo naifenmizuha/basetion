@@ -2,8 +2,8 @@
 
 ## 覆盖路径
 
-- `internal/bootstrap`
-- `internal/config`
+- `src/internal/bootstrap`
+- `src/internal/config`
 
 ## 配置
 
@@ -19,6 +19,6 @@
 
 ## 组合根
 
-`bootstrap.Execute` 是具体实现的装配位置，依次完成：全局配置和中文语言初始化、文件 Session 存储、内存知识检索器、知识工具、TeamOps Lua 执行器、TeamOps 领域服务与工具、AgenticModel、Harness Runtime、会话服务和 CLI 调用。存储装配读取初始化后的 Session 配置；Harness 内部通过全局配置快照读取 OpenAI 和 Agent 参数，构造函数不再接收 `Config` 参数。
+`bootstrap.Execute` 是具体实现的装配位置，依次完成：全局配置和中文语言初始化、文件 Session 存储、TeamOps Lua 执行器、TeamOps 领域服务与工具、AgenticModel、Harness Runtime、会话服务和 CLI 调用。存储装配读取初始化后的 Session 配置；Harness 内部通过全局配置快照读取 OpenAI 和 Agent 参数，并从当前工作目录的 `skills/` 初始化必需 Skill，构造函数不接收 `Config` 参数。
 
 任一步初始化失败都会向 stderr 输出带阶段语义的错误并返回非零退出码。启动日志使用脱敏诊断字段；具体依赖关系不下沉到入口或领域模块。

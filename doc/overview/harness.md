@@ -2,15 +2,25 @@
 
 ## 覆盖路径
 
-- `internal/harness`
+- `src/internal/harness`
+- `skills`
 
 ## 模型与运行时
 
 `NewAgenticModel` 从已初始化的全局配置快照读取模型名、API Key 和可选 Base URL，创建 Eino OpenAI Responses `AgenticModel`。
 
-`NewRuntime` 从同一配置快照读取最大迭代次数和调试开关，构造一个 `TypedChatModelAgent[*schema.AgenticMessage]`，注册工具和系统指令，再包装为启用流式输出的 `TypedRunner`。两个构造函数均不接收配置参数，要求 Bootstrap 先完成配置初始化。Harness 直接组合 Eino 的具体类型，不额外定义第二套运行时抽象。
+`NewRuntime` 从同一配置快照读取最大迭代次数和调试开关，构造一个 `TypedChatModelAgent[*schema.AgenticMessage]`，注册工具、嵌入式系统指令和 Skill Middleware，再包装为启用流式输出的 `TypedRunner`。两个构造函数均不接收配置参数，要求 Bootstrap 先完成配置初始化。Harness 直接组合 Eino 的具体类型，不额外定义第二套运行时抽象。
 
-默认指令要求助手基于对话上下文回答，在需要项目知识时调用 `search_knowledge`；需要棒球队结构化数据时先用 `teamops` 的 `describe` 发现能力，再用 `query` 执行只读 Lua，不得尝试写入。指令同时要求区分模型显式 reasoning 摘要与最终回答。
+系统指令通过 `go:embed` 从 `prompts/system.md` 编译进二进制，只保留身份、按需加载 Skill、禁止编造、事实与推断区分、默认语言和不输出私有推理等全局不变量。
+
+Skill Middleware 使用 Eino Ext 本地文件 Backend，从进程当前工作目录的 `skills/` 扫描一级子目录中的 `SKILL.md`。启动时完整加载 frontmatter，拒绝目录缺失、格式错误、空名称或描述、重复名称以及必需 Skill 缺失；失败会终止 Runtime 初始化。Backend 仅交给 Skill Middleware，不向模型注册通用文件或 Shell 工具。
+
+当前必需 Skill 为：
+
+- `project-knowledge`：提供 Basetion 定位、当前能力、六层职责、Session/Checkpoint 区别和明确限制。
+- `manage-teamops`：规定球队结构化事实必须先 `describe`、确认模块可用后再执行最窄只读 `query`，并约束失败与不可用状态处理。
+
+Skill 中间件动态提供模型可见的 `skill` 工具；业务工具列表只显式注册 `teamops`。两个 Skill 均为自包含单文件，当前不使用引用文件或通用文件读取能力。
 
 ## 生命周期回调
 

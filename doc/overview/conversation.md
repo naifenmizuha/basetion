@@ -2,7 +2,7 @@
 
 ## 覆盖路径
 
-- `internal/application/conversation`
+- `src/internal/application/conversation`
 
 ## 业务 Session
 

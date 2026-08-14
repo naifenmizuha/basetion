@@ -1,4 +1,4 @@
 default: run
 
 run:
-    GOTOOLCHAIN=auto go run ./cmd/basetion --session-id demo "你有什么能力？"
+    GOTOOLCHAIN=auto go run ./src/cmd/basetion --session-id demo "你有什么能力？"

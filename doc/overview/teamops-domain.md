@@ -2,7 +2,7 @@
 
 ## 覆盖路径
 
-- `internal/domain/teamops`
+- `src/internal/domain/teamops`
 
 ## 查询契约
 

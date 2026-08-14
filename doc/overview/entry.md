@@ -2,14 +2,14 @@
 
 ## 覆盖路径
 
-- `cmd/basetion`
-- `internal/entry/cli`
+- `src/cmd/basetion`
+- `src/internal/entry/cli`
 
 ## 进程入口
 
-`cmd/basetion/main.go` 使用后台 Context 调用 `bootstrap.Execute`，传入命令行参数、标准输出和标准错误，并以返回值作为进程退出码。业务依赖不在 main 包中构造。
+`src/cmd/basetion/main.go` 使用后台 Context 调用 `bootstrap.Execute`，传入命令行参数、标准输出和标准错误，并以返回值作为进程退出码。业务依赖不在 main 包中构造。
 
-仓库根目录的 `justfile` 提供默认的 `run` 配方；执行 `just` 或 `just run` 会通过 `go run ./cmd/basetion --session-id demo "介绍一下这个项目"` 启动一个固定提示词的 demo 会话。
+仓库根目录的 `justfile` 提供默认的 `run` 配方；执行 `just` 或 `just run` 会通过 `go run ./src/cmd/basetion --session-id demo "你有什么能力？"` 启动一个固定提示词的 demo 会话。
 
 ## CLI 协议
 
