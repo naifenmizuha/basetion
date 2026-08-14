@@ -4,6 +4,7 @@
 
 - `internal/infra/session`
 - `internal/infra/knowledge`
+- `internal/infra/teamops`
 
 ## Session 文件存储
 
@@ -16,3 +17,9 @@
 `MemoryRetriever` 持有构造时文档切片的副本。默认语料包含架构、Session/Checkpoint 和 AgenticModel 三条开发期知识。
 
 检索将查询按空白和标点分词，对标题与内容执行不区分大小写的词频计分，只返回正分文档；结果按分数降序、ID 升序稳定排序，再裁剪到 limit。该实现是确定性的开发适配器，不提供持久化、语义向量或远程数据源。
+
+## TeamOps Lua 运行时
+
+`LuaExecutor` 使用 GopherLua 为每次查询创建独立 State，只开放裁剪后的 base、`table`、`string` 和 `math` 能力。文件、系统、模块加载、动态代码、调试、协程、channel、打印、随机数和元表修改均不可用。`teamops` 以只读 userdata 代理暴露 `array()` 和 `null`，脚本无法替换宿主能力。
+
+默认限制为 2 秒、32 KiB 源码、32 层返回深度、10,000 个 table 元素和 256 KiB JSON 结果。返回转换支持 nil、布尔、有限数值、UTF-8 字符串与 table；连续正整数键映射为数组，字符串键映射为对象，并拒绝循环、稀疏或混合键及不可序列化值。当前运行时不注册真实 TeamOps 数据模块。

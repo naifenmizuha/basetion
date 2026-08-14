@@ -18,7 +18,9 @@ import (
 	"github.com/cloudwego/eino/schema"
 	appconfig "github.com/naifenmizuha/basetion/internal/config"
 	"github.com/naifenmizuha/basetion/internal/domain/knowledge"
+	domainteamops "github.com/naifenmizuha/basetion/internal/domain/teamops"
 	infraknowledge "github.com/naifenmizuha/basetion/internal/infra/knowledge"
+	infrateamops "github.com/naifenmizuha/basetion/internal/infra/teamops"
 	basetiontools "github.com/naifenmizuha/basetion/internal/tools"
 )
 
@@ -174,6 +176,50 @@ func TestRuntimeStreamsAgenticContentAndUsesTools(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "介绍 Go") || strings.Contains(logs.String(), "Go language") {
 		t.Fatalf("safe callbacks leaked payloads: %s", logs.String())
+	}
+}
+
+func TestRuntimeUsesTeamOpsTool(t *testing.T) {
+	t.Parallel()
+
+	executor, err := infrateamops.NewLuaExecutor(infrateamops.DefaultLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := domainteamops.NewService(executor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	teamOpsTool, err := basetiontools.NewTeamOps(service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := &scriptedAgenticModel{responses: [][]*schema.AgenticMessage{
+		{assistantMessage(schema.NewContentBlockChunk(&schema.FunctionToolCall{
+			CallID:    "teamops-call",
+			Name:      basetiontools.TeamOpsToolName,
+			Arguments: `{"mode":"query","program":"function main() return {total = 6 + 7} end"}`,
+		}, &schema.StreamingMeta{Index: 0}))},
+		{assistantMessage(schema.NewContentBlockChunk(&schema.AssistantGenText{Text: "结果是 13。"}, &schema.StreamingMeta{Index: 0}))},
+	}}
+	runtime, err := NewRuntime(context.Background(), model, []tool.BaseTool{teamOpsTool}, log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages, err := collectRunnerMessages(t, runtime.Runner.Query(context.Background(), "计算结果", adk.WithCallbacks(runtime.Callback)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawResult bool
+	for _, message := range messages {
+		for _, block := range message.ContentBlocks {
+			if result := block.FunctionToolResult; result != nil && result.Name == basetiontools.TeamOpsToolName {
+				sawResult = result.CallID == "teamops-call" && strings.Contains(result.Content[0].String(), `"total":13`)
+			}
+		}
+	}
+	if !sawResult {
+		t.Fatalf("teamops result not observed: %#v", messages)
 	}
 }
 

@@ -1,12 +1,13 @@
 module github.com/naifenmizuha/basetion
 
-go 1.22
+go 1.26.6
 
 require (
 	github.com/cloudwego/eino v0.9.14
 	github.com/cloudwego/eino-ext/components/model/agenticopenai v0.2.2
 	github.com/spf13/viper v1.20.1
 	github.com/subosito/gotenv v1.6.0
+	github.com/yuin/gopher-lua v1.1.2
 )
 
 require (

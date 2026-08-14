@@ -11,10 +11,12 @@ import (
 	"github.com/naifenmizuha/basetion/internal/application/conversation"
 	"github.com/naifenmizuha/basetion/internal/config"
 	"github.com/naifenmizuha/basetion/internal/domain/knowledge"
+	domainteamops "github.com/naifenmizuha/basetion/internal/domain/teamops"
 	"github.com/naifenmizuha/basetion/internal/entry/cli"
 	"github.com/naifenmizuha/basetion/internal/harness"
 	infraknowledge "github.com/naifenmizuha/basetion/internal/infra/knowledge"
 	infrasession "github.com/naifenmizuha/basetion/internal/infra/session"
+	infrateamops "github.com/naifenmizuha/basetion/internal/infra/teamops"
 	basetiontools "github.com/naifenmizuha/basetion/internal/tools"
 )
 
@@ -48,12 +50,27 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "初始化知识工具失败: %v\n", err)
 		return 1
 	}
+	teamOpsExecutor, err := infrateamops.NewLuaExecutor(infrateamops.DefaultLimits())
+	if err != nil {
+		fmt.Fprintf(stderr, "初始化 TeamOps Lua 执行器失败: %v\n", err)
+		return 1
+	}
+	teamOpsService, err := domainteamops.NewService(teamOpsExecutor)
+	if err != nil {
+		fmt.Fprintf(stderr, "初始化 TeamOps 领域服务失败: %v\n", err)
+		return 1
+	}
+	teamOpsTool, err := basetiontools.NewTeamOps(teamOpsService)
+	if err != nil {
+		fmt.Fprintf(stderr, "初始化 TeamOps 工具失败: %v\n", err)
+		return 1
+	}
 	agenticModel, err := harness.NewAgenticModel(ctx)
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化 AgenticModel 失败: %v\n", err)
 		return 1
 	}
-	runtime, err := harness.NewRuntime(ctx, agenticModel, []tool.BaseTool{knowledgeTool}, logger)
+	runtime, err := harness.NewRuntime(ctx, agenticModel, []tool.BaseTool{knowledgeTool, teamOpsTool}, logger)
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化 Agent Harness 失败: %v\n", err)
 		return 1

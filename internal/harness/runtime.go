@@ -14,7 +14,7 @@ import (
 	appconfig "github.com/naifenmizuha/basetion/internal/config"
 )
 
-const defaultInstruction = `你是 Basetion 助手。请基于当前对话上下文回答问题；需要已有项目知识时调用 search_knowledge 工具。明确区分模型显式提供的 reasoning 摘要与最终回答。`
+const defaultInstruction = `你是 Basetion 助手。请基于当前对话上下文回答问题；需要已有项目知识时调用 search_knowledge 工具。需要棒球队结构化数据时使用 teamops 工具：先用 describe 按需了解模块，再用 query 执行只读 Lua 查询；不得尝试通过该工具写入或修改数据。明确区分模型显式提供的 reasoning 摘要与最终回答。`
 
 // Runtime groups the concrete Eino types needed by the application. It does
 // not define a second agent runtime abstraction.
@@ -36,7 +36,7 @@ func NewRuntime(
 	cfg := appconfig.Get()
 	agent, err := adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{
 		Name:          "basetion",
-		Description:   "使用项目知识工具回答问题的 Basetion 助手",
+		Description:   "使用项目知识与 TeamOps 只读工具回答问题的 Basetion 助手",
 		Instruction:   defaultInstruction,
 		Model:         agenticModel,
 		MaxIterations: cfg.Agent.MaxIterations,

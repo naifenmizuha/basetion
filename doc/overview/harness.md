@@ -10,7 +10,7 @@
 
 `NewRuntime` 从同一配置快照读取最大迭代次数和调试开关，构造一个 `TypedChatModelAgent[*schema.AgenticMessage]`，注册工具和系统指令，再包装为启用流式输出的 `TypedRunner`。两个构造函数均不接收配置参数，要求 Bootstrap 先完成配置初始化。Harness 直接组合 Eino 的具体类型，不额外定义第二套运行时抽象。
 
-默认指令要求助手基于对话上下文回答，在需要项目知识时调用 `search_knowledge`，并区分模型显式 reasoning 摘要与最终回答。
+默认指令要求助手基于对话上下文回答，在需要项目知识时调用 `search_knowledge`；需要棒球队结构化数据时先用 `teamops` 的 `describe` 发现能力，再用 `query` 执行只读 Lua，不得尝试写入。指令同时要求区分模型显式 reasoning 摘要与最终回答。
 
 ## 生命周期回调
 

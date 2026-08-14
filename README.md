@@ -10,14 +10,14 @@ Basetion 是一个以 Go 和 CloudWeGo Eino ADK 为核心的 Agent 应用骨架�
 2. `internal/application/conversation`：管理业务 Session、并发锁和一轮对话的事务边界。
 3. `internal/harness`：用 Eino `AgenticModel`、`TypedChatModelAgent[*schema.AgenticMessage]`、工具与 `TypedRunner` 编排 Agent 运行。
 4. `internal/tools`：把模型工具协议适配到领域服务，校验并转换工具输入输出。
-5. `internal/domain`：表达知识检索等领域能力，只依赖抽象的存储接口。
-6. `internal/infra`：实现本地 Session 文件、内存检索器；将来可替换为数据库或向量库适配器。
+5. `internal/domain`：表达知识检索和 TeamOps 只读程序查询等领域能力，只依赖抽象接口。
+6. `internal/infra`：实现本地 Session 文件、内存检索器和受限 Lua 查询运行时；将来可替换为数据库、向量库或真实 TeamOps SDK 适配器。
 
 入口只调用会话应用服务；会话服务使用 Eino Runner，但不理解模型或工具内部实现；Harness 调用工具；工具只调用领域服务；基础设施实现应用层或领域层定义的接口。智能匹配已有上下文若属于一次 Agent 运行策略，应放在 Harness；若决定业务 Session 中哪些历史可见，则由会话应用层制定策略、Harness 执行。
 
 ## 运行 CLI
 
-需要 Go 1.22+。先复制示例配置：
+需要 Go 1.26.6+。先复制示例配置：
 
 ```shell
 cp config/config.example.toml config/config.toml

@@ -13,8 +13,8 @@ cmd/basetion
       -> internal/application/conversation
         -> internal/harness (Eino Runner)
           -> internal/tools
-            -> internal/domain/knowledge
-              <- internal/infra/knowledge
+            -> internal/domain/{knowledge,teamops}
+              <- internal/infra/{knowledge,teamops}
         -> internal/infra/session
 ```
 
@@ -28,12 +28,13 @@ cmd/basetion
 - [`harness.md`](harness.md)：AgenticModel、Eino Agent/Runner 和生命周期回调。
 - [`tools.md`](tools.md)：模型工具协议适配。
 - [`knowledge-domain.md`](knowledge-domain.md)：知识检索领域模型与规则。
-- [`infrastructure.md`](infrastructure.md)：Session 文件存储与内存知识检索。
+- [`teamops-domain.md`](teamops-domain.md)：TeamOps 可编程只读查询契约与占位模块。
+- [`infrastructure.md`](infrastructure.md)：Session 文件存储、内存知识检索与 Lua 查询运行时。
 
 ## 跨模块运行流程
 
 1. `cmd/basetion` 将进程参数和标准流交给组合根。
-2. 组合根加载环境配置，创建 Session 存储、知识检索器、领域服务、工具、模型、Harness 和会话服务。
+2. 组合根加载环境配置，创建 Session 存储、知识检索器、TeamOps Lua 执行器、领域服务、工具、模型、Harness 和会话服务。
 3. CLI 校验 `--session-id` 与提示词，调用会话服务并消费异步事件。
 4. 会话服务按 Session ID 串行化运行，载入已完成历史并调用 Eino Runner。
 5. Runner 流式产生 reasoning、文本、工具调用、工具结果和动作，CLI 按语义块展示。
@@ -45,3 +46,4 @@ cmd/basetion
 - 知识库是进程内固定语料与确定性词频检索，不是生产向量库。
 - 业务 Session 使用本地 JSON 快照；Eino Checkpoint 尚未启用。
 - 模型使用兼容 OpenAI Responses API 的 Eino `AgenticModel` 实现。
+- TeamOps 当前只提供受限 Lua 执行和能力发现，棒球队数据模块尚未接入。
