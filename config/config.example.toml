@@ -1,0 +1,11 @@
+[openai]
+model = "gpt-5"
+api_key = ""
+base_url = "https://api.openai.com/v1"
+
+[session]
+dir = ".basetion/sessions"
+
+[agent]
+max_iterations = 20
+unsafe_debug_data = false
