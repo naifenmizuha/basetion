@@ -6,6 +6,7 @@ require (
 	github.com/cloudwego/eino v0.9.14
 	github.com/cloudwego/eino-ext/adk/backend/local v0.2.5
 	github.com/cloudwego/eino-ext/components/model/agenticopenai v0.2.2
+	github.com/jackc/pgx/v5 v5.10.0
 	github.com/spf13/viper v1.20.1
 	github.com/subosito/gotenv v1.6.0
 	github.com/yuin/gopher-lua v1.1.2
@@ -31,6 +32,9 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/goph/emperror v0.17.2 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/jupiterrider/ffi v0.5.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
@@ -61,8 +65,8 @@ require (
 	golang.org/x/arch v0.11.0 // indirect
 	golang.org/x/exp v0.0.0-20230713183714-613f0c0eb8a1 // indirect
 	golang.org/x/net v0.34.0 // indirect
-	golang.org/x/sync v0.10.0 // indirect
+	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/text v0.29.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

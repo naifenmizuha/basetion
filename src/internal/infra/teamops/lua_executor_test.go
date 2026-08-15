@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	domain "github.com/naifenmizuha/basetion/src/internal/domain/teamops"
 )
 
 func testExecutor(t *testing.T) *LuaExecutor {
@@ -18,10 +20,14 @@ func testExecutor(t *testing.T) *LuaExecutor {
 	return executor
 }
 
+func execute(executor *LuaExecutor, ctx context.Context, program string) (any, error) {
+	return executor.Execute(ctx, domain.Query{Program: program})
+}
+
 func TestLuaExecutorAggregatesAndConvertsResult(t *testing.T) {
 	t.Parallel()
 	executor := testExecutor(t)
-	result, err := executor.Execute(context.Background(), `
+	result, err := execute(executor, context.Background(), `
 function main(teamops)
     local values = {4, 1, 3, 2}
     table.sort(values)
@@ -57,7 +63,7 @@ end`)
 func TestLuaExecutorSandbox(t *testing.T) {
 	t.Parallel()
 	executor := testExecutor(t)
-	result, err := executor.Execute(context.Background(), `
+	result, err := execute(executor, context.Background(), `
 function main(teamops)
     return {
         os = type(os), io = type(io), require = type(require),
@@ -74,13 +80,13 @@ end`)
 			t.Fatalf("sandbox global %s has type %v", name, value)
 		}
 	}
-	if _, err := executor.Execute(context.Background(), `function main(teamops) teamops.array = 1 end`); err == nil || !strings.Contains(err.Error(), "read-only") {
+	if _, err := execute(executor, context.Background(), `function main(teamops) teamops.array = 1 end`); err == nil || !strings.Contains(err.Error(), "read-only") {
 		t.Fatalf("teamops mutation error = %v", err)
 	}
-	if _, err := executor.Execute(context.Background(), `function main(teamops) table.insert(teamops, 1) end`); err == nil || !strings.Contains(err.Error(), "table expected") {
+	if _, err := execute(executor, context.Background(), `function main(teamops) table.insert(teamops, 1) end`); err == nil || !strings.Contains(err.Error(), "table expected") {
 		t.Fatalf("teamops raw table mutation error = %v", err)
 	}
-	if _, err := executor.Execute(context.Background(), `function main(teamops) return teamops.array({}) end`); err == nil || !strings.Contains(err.Error(), "does not accept arguments") {
+	if _, err := execute(executor, context.Background(), `function main(teamops) return teamops.array({}) end`); err == nil || !strings.Contains(err.Error(), "does not accept arguments") {
 		t.Fatalf("teamops.array argument error = %v", err)
 	}
 }
@@ -91,7 +97,7 @@ func TestLuaExecutorHonorsTimeout(t *testing.T) {
 	limits.Timeout = 20 * time.Millisecond
 	executor, _ := NewLuaExecutor(limits)
 	started := time.Now()
-	_, err := executor.Execute(context.Background(), `function main(teamops) while true do end end`)
+	_, err := execute(executor, context.Background(), `function main(teamops) while true do end end`)
 	if err == nil || !strings.Contains(err.Error(), "canceled") {
 		t.Fatalf("timeout error = %v", err)
 	}
@@ -119,7 +125,7 @@ func TestLuaExecutorRejectsInvalidResults(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := executor.Execute(context.Background(), test.program)
+			_, err := execute(executor, context.Background(), test.program)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want substring %q", err, test.want)
 			}
@@ -134,10 +140,10 @@ func TestLuaExecutorLimits(t *testing.T) {
 	limits.MaxElements = 2
 	limits.MaxResultBytes = 12
 	executor, _ := NewLuaExecutor(limits)
-	if _, err := executor.Execute(context.Background(), `function main() return {1, 2, 3} end`); err == nil || !strings.Contains(err.Error(), "elements") {
+	if _, err := execute(executor, context.Background(), `function main() return {1, 2, 3} end`); err == nil || !strings.Contains(err.Error(), "elements") {
 		t.Fatalf("element limit error = %v", err)
 	}
-	if _, err := executor.Execute(context.Background(), `function main() return "a result larger than twelve bytes" end`); err == nil || !strings.Contains(err.Error(), "result exceeds") {
+	if _, err := execute(executor, context.Background(), `function main() return "a result larger than twelve bytes" end`); err == nil || !strings.Contains(err.Error(), "result exceeds") {
 		t.Fatalf("result limit error = %v", err)
 	}
 }

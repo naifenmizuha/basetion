@@ -14,7 +14,38 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-const usage = "用法: basetion [--session-id <ID>] <提示词>"
+const usage = "用法: basetion [--profile run|dev] [--session-id <ID>] <提示词>"
+
+const (
+	ProfileRun = "run"
+	ProfileDev = "dev"
+)
+
+// ExtractProfile resolves the bootstrap profile and removes its flag before
+// the remaining CLI arguments are parsed.
+func ExtractProfile(args []string) (string, []string, error) {
+	profile := ProfileRun
+	remaining := make([]string, 0, len(args))
+	for index := 0; index < len(args); index++ {
+		argument := args[index]
+		switch {
+		case argument == "--profile":
+			if index+1 >= len(args) {
+				return "", nil, errors.New("--profile requires run or dev")
+			}
+			index++
+			profile = args[index]
+		case strings.HasPrefix(argument, "--profile="):
+			profile = strings.TrimPrefix(argument, "--profile=")
+		default:
+			remaining = append(remaining, argument)
+		}
+	}
+	if profile != ProfileRun && profile != ProfileDev {
+		return "", nil, fmt.Errorf("unknown profile %q: want run or dev", profile)
+	}
+	return profile, remaining, nil
+}
 
 // Conversation is the entry-facing application use-case contract.
 type Conversation interface {

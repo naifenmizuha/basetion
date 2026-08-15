@@ -2,6 +2,23 @@
 
 本文件适用于整个仓库。所有在本仓库中修改代码的 Codex Agent 都必须遵守以下文档规则。
 
+## 分层与模块落位
+
+- `src/internal/application` 只放面向外部调用方的应用接口、用例门面和业务入口边界；当前直接子模块只有 `conversation`。
+- 未实现对应的外部调用契约前，不得为新领域创建 application 子包。用户要求“领域层能力”时，不得自行将其提升为 application service。
+- 领域实体、值对象、领域服务、Repository 端口和 UnitOfWork 端口放在 `src/internal/domain/<module>`。
+- `src/internal/infra` 实现领域层或既有应用边界定义的持久化、事务与运行时端口，不反向定义领域规则。
+- 新增 `src/internal` 顶级职责目录或 application 直接子模块前，先向用户说明所属层、职责和依赖方向；存在多种合理落位时必须先确认。
+- `src/internal/architecture` 中的自动化测试是分层约束的一部分；不得通过删除、跳过或弱化测试来绕过落位规则。
+
+## 配置管理
+
+- 模型、数据库、Session 和 Agent 等非密钥运行配置统一写入 `config/config.toml`，并在 `config/config.example.toml` 中维护对应模板。
+- 数据库配置使用 `database.run` 与 `database.dev` 两个 profile：run 只允许固定库；dev 可配置固定库或由基础设施按次创建、迁移并清理的临时库。
+- `justfile` 和其他启动脚本不得硬编码或通过临时环境变量覆盖数据库连接等运行配置；`--profile` 只负责选择 TOML 中的 profile，不承载连接信息。
+- Docker Compose 只部署长期运行的依赖服务；应用和测试命令不得隐式启动或停止依赖容器。
+- API Key 等密钥不得写入 TOML；`config/config.toml` 只声明 `openai.api_key_env`，真实密钥通过该名称对应的进程环境变量或被 Git 忽略的 `.env` 提供。
+
 ## 文档即交付物
 
 只有用户明确要求创建提交时，才执行以下两项文档工作；文档未更新则该提交未完成：

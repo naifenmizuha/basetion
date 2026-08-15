@@ -8,14 +8,39 @@ import (
 )
 
 type stubExecutor struct {
-	program string
-	result  any
-	err     error
+	query     Query
+	available []string
+	result    any
+	err       error
 }
 
-func (e *stubExecutor) Execute(_ context.Context, program string) (any, error) {
-	e.program = program
+func (e *stubExecutor) AvailableModules() []string { return e.available }
+func (e *stubExecutor) Execute(_ context.Context, query Query) (any, error) {
+	e.query = query
 	return e.result, e.err
+}
+
+func TestRosterAvailabilityComesFromExecutor(t *testing.T) {
+	t.Parallel()
+	executor := &stubExecutor{available: []string{"roster"}, result: []any{}}
+	service, err := NewService(executor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	description, err := service.Describe(context.Background(), []string{"roster"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(description.Modules) != 1 || !description.Modules[0].Available {
+		t.Fatalf("description=%#v", description)
+	}
+	program := "function main(teamops) return teamops.array() end"
+	if _, err := service.Query(context.Background(), []string{"roster"}, program); err != nil {
+		t.Fatal(err)
+	}
+	if len(executor.query.Modules) != 1 || executor.query.Modules[0] != "roster" {
+		t.Fatalf("query=%#v", executor.query)
+	}
 }
 
 func TestDescribeModules(t *testing.T) {
@@ -54,8 +79,8 @@ func TestQueryValidationAndDelegation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if executor.program != program || result.(map[string]any)["count"] != 3 {
-		t.Fatalf("unexpected delegation: program=%q result=%#v", executor.program, result)
+	if executor.query.Program != program || result.(map[string]any)["count"] != 3 {
+		t.Fatalf("unexpected delegation: query=%#v result=%#v", executor.query, result)
 	}
 	if _, err := service.Query(context.Background(), []string{"game"}, program); !errors.Is(err, ErrModuleUnavailable) {
 		t.Fatalf("unavailable module error = %v", err)

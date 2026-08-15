@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
@@ -13,20 +14,28 @@ import (
 	domainteamops "github.com/naifenmizuha/basetion/src/internal/domain/teamops"
 	"github.com/naifenmizuha/basetion/src/internal/entry/cli"
 	"github.com/naifenmizuha/basetion/src/internal/harness"
+	infrapostgres "github.com/naifenmizuha/basetion/src/internal/infra/postgres"
 	infrasession "github.com/naifenmizuha/basetion/src/internal/infra/session"
 	infrateamops "github.com/naifenmizuha/basetion/src/internal/infra/teamops"
 	basetiontools "github.com/naifenmizuha/basetion/src/internal/tools"
 )
 
 // Execute assembles the first vertical slice and invokes the CLI adapter.
-func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exitCode int) {
+	profile, args, err := cli.ExtractProfile(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "参数错误: %v\n", err)
+		return 2
+	}
 	if err := config.Init(); err != nil {
 		fmt.Fprintf(stderr, "配置错误: %v\n", err)
 		return 2
 	}
 	cfg := config.Get()
 	logger := log.New(stderr, "basetion ", log.LstdFlags)
-	logger.Printf("启动配置: %v", cfg.DiagnosticFields())
+	diagnosticFields := cfg.DiagnosticFields()
+	diagnosticFields["profile"] = profile
+	logger.Printf("启动配置: %v", diagnosticFields)
 	if err := adk.SetLanguage(adk.LanguageChinese); err != nil {
 		fmt.Fprintf(stderr, "初始化 Eino 语言失败: %v\n", err)
 		return 1
@@ -37,7 +46,34 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "初始化 Session 存储失败: %v\n", err)
 		return 1
 	}
-	teamOpsExecutor, err := infrateamops.NewLuaExecutor(infrateamops.DefaultLimits())
+	databaseProfile := cfg.Database.Run
+	if profile == cli.ProfileDev {
+		databaseProfile = cfg.Database.Dev
+	}
+	var database *infrapostgres.ManagedStore
+	switch databaseProfile.Mode {
+	case config.DatabaseModeFixed:
+		database, err = infrapostgres.OpenFixed(ctx, databaseProfile.URL)
+	case config.DatabaseModeTemporary:
+		database, err = infrapostgres.OpenTemporary(ctx, databaseProfile.AdminURL, databaseProfile.TemporaryPrefix, infrapostgres.WithDevelopmentFixtures())
+	default:
+		err = fmt.Errorf("unsupported database mode %q", databaseProfile.Mode)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "初始化 PostgreSQL 失败: %v\n", err)
+		return 1
+	}
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := database.Close(cleanupCtx); err != nil {
+			fmt.Fprintf(stderr, "清理 PostgreSQL 失败: %v\n", err)
+			if exitCode == 0 {
+				exitCode = 1
+			}
+		}
+	}()
+	teamOpsExecutor, err := infrateamops.NewLuaExecutor(infrateamops.DefaultLimits(), infrateamops.WithRosterReader(database.Store.RosterReader()))
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化 TeamOps Lua 执行器失败: %v\n", err)
 		return 1

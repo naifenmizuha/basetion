@@ -134,3 +134,20 @@ func TestExecuteRejectsInputAndReportsAgentFailure(t *testing.T) {
 		t.Fatalf("failure code=%d stderr=%q", code, stderr.String())
 	}
 }
+
+func TestExtractProfile(t *testing.T) {
+	profile, args, err := ExtractProfile([]string{"--profile", "dev", "--session-id", "s", "prompt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile != ProfileDev || strings.Join(args, "|") != "--session-id|s|prompt" {
+		t.Fatalf("profile=%q args=%q", profile, args)
+	}
+	profile, args, err = ExtractProfile([]string{"prompt"})
+	if err != nil || profile != ProfileRun || len(args) != 1 {
+		t.Fatalf("default profile=%q args=%q err=%v", profile, args, err)
+	}
+	if _, _, err := ExtractProfile([]string{"--profile=unknown", "prompt"}); err == nil {
+		t.Fatal("unknown profile accepted")
+	}
+}

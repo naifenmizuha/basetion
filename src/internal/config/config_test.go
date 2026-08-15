@@ -14,6 +14,15 @@ model = "gpt-from-file"
 api_key_env = "TEST_OPENAI_API_KEY"
 base_url = "https://file.invalid/v1"
 
+[database.run]
+mode = "fixed"
+url = "postgres://file.invalid/basetion"
+
+[database.dev]
+mode = "temporary"
+admin_url = "postgres://file.invalid/postgres"
+temporary_prefix = "basetion_test"
+
 [session]
 dir = "/tmp/file-sessions"
 
@@ -53,6 +62,7 @@ func clearConfigEnvironment(t *testing.T) {
 		"OPENAI_API_KEY_ENV",
 		"OPENAI_BASE_URL",
 		"BASETION_SESSION_DIR",
+		"BASETION_DATABASE_URL",
 		"BASETION_MAX_ITERATIONS",
 		"BASETION_UNSAFE_DEBUG_DATA",
 		"TEST_OPENAI_API_KEY",
@@ -84,7 +94,7 @@ func TestLoadFile(t *testing.T) {
 	if cfg.OpenAI.Model != "gpt-from-file" || cfg.OpenAI.APIKeyEnv != "TEST_OPENAI_API_KEY" || cfg.OpenAI.APIKey != "file-secret" || cfg.OpenAI.BaseURL != "https://file.invalid/v1" {
 		t.Fatalf("unexpected OpenAI config: %#v", cfg.OpenAI)
 	}
-	if cfg.Session.Dir != "/tmp/file-sessions" || cfg.Agent.MaxIterations != 7 || !cfg.Agent.UnsafeDebugData {
+	if cfg.Database.Run.URL != "postgres://file.invalid/basetion" || cfg.Database.Dev.Mode != DatabaseModeTemporary || cfg.Database.Dev.TemporaryPrefix != "basetion_test" || cfg.Session.Dir != "/tmp/file-sessions" || cfg.Agent.MaxIterations != 7 || !cfg.Agent.UnsafeDebugData {
 		t.Fatalf("unexpected config: %#v", cfg)
 	}
 	if fields := cfg.DiagnosticFields(); fields["api_key"] != nil || strings.Contains(fmt.Sprint(fields), cfg.OpenAI.APIKey) {
@@ -98,6 +108,14 @@ func TestLoadFileDefaults(t *testing.T) {
 	contents := `[openai]
 model = "gpt-defaults"
 api_key_env = "TEST_OPENAI_API_KEY"
+
+[database.run]
+mode = "fixed"
+url = "postgres://defaults.invalid/basetion"
+
+[database.dev]
+mode = "fixed"
+url = "postgres://defaults.invalid/basetion_dev"
 `
 
 	cfg, err := loadWithoutDotEnv(t, contents)
@@ -109,13 +127,26 @@ api_key_env = "TEST_OPENAI_API_KEY"
 	}
 }
 
-func TestEnvironmentOverridesFile(t *testing.T) {
+func TestLoadDatabaseFileDoesNotRequireAPIKey(t *testing.T) {
+	clearConfigEnvironment(t)
+	database, err := LoadDatabaseFile(writeConfig(t, validTOML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if database.Run.Mode != DatabaseModeFixed || database.Dev.Mode != DatabaseModeTemporary {
+		t.Fatalf("database=%#v", database)
+	}
+}
+
+func TestNonSecretEnvironmentDoesNotOverrideFile(t *testing.T) {
 	clearConfigEnvironment(t)
 	t.Setenv("OPENAI_MODEL", "gpt-from-env")
 	t.Setenv("OPENAI_API_KEY_ENV", "ENV_OPENAI_API_KEY")
 	t.Setenv("ENV_OPENAI_API_KEY", "env-secret")
+	t.Setenv("TEST_OPENAI_API_KEY", "file-secret")
 	t.Setenv("OPENAI_BASE_URL", "https://env.invalid/v1")
 	t.Setenv("BASETION_SESSION_DIR", "/tmp/env-sessions")
+	t.Setenv("BASETION_DATABASE_URL", "postgres://env.invalid/basetion")
 	t.Setenv("BASETION_MAX_ITERATIONS", "11")
 	t.Setenv("BASETION_UNSAFE_DEBUG_DATA", "false")
 
@@ -123,20 +154,20 @@ func TestEnvironmentOverridesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadFile() error = %v", err)
 	}
-	if cfg.OpenAI.Model != "gpt-from-env" || cfg.OpenAI.APIKeyEnv != "ENV_OPENAI_API_KEY" || cfg.OpenAI.APIKey != "env-secret" || cfg.OpenAI.BaseURL != "https://env.invalid/v1" {
-		t.Fatalf("environment did not override OpenAI config: %#v", cfg.OpenAI)
+	if cfg.OpenAI.Model != "gpt-from-file" || cfg.OpenAI.APIKeyEnv != "TEST_OPENAI_API_KEY" || cfg.OpenAI.APIKey != "file-secret" || cfg.OpenAI.BaseURL != "https://file.invalid/v1" {
+		t.Fatalf("environment overrode TOML OpenAI config: %#v", cfg.OpenAI)
 	}
-	if cfg.Session.Dir != "/tmp/env-sessions" || cfg.Agent.MaxIterations != 11 || cfg.Agent.UnsafeDebugData {
-		t.Fatalf("environment did not override config: %#v", cfg)
+	if cfg.Database.Run.URL != "postgres://file.invalid/basetion" || cfg.Session.Dir != "/tmp/file-sessions" || cfg.Agent.MaxIterations != 7 || !cfg.Agent.UnsafeDebugData {
+		t.Fatalf("environment overrode TOML config: %#v", cfg)
 	}
 }
 
-func TestDotEnvProvidesConfigurationAndAPIKey(t *testing.T) {
+func TestDotEnvProvidesOnlyReferencedAPIKey(t *testing.T) {
 	clearConfigEnvironment(t)
 	dotenvPath := writeDotEnv(t, `OPENAI_MODEL=gpt-from-dotenv
-OPENAI_API_KEY_ENV=DOTENV_OPENAI_API_KEY
-DOTENV_OPENAI_API_KEY=dotenv-secret
+TEST_OPENAI_API_KEY=dotenv-secret
 OPENAI_BASE_URL=https://dotenv.invalid/v1
+BASETION_DATABASE_URL=postgres://dotenv.invalid/basetion
 BASETION_SESSION_DIR=/tmp/dotenv-sessions
 BASETION_MAX_ITERATIONS=13
 BASETION_UNSAFE_DEBUG_DATA=true
@@ -146,30 +177,24 @@ BASETION_UNSAFE_DEBUG_DATA=true
 	if err != nil {
 		t.Fatalf("loadFiles() error = %v", err)
 	}
-	if cfg.OpenAI.Model != "gpt-from-dotenv" || cfg.OpenAI.APIKeyEnv != "DOTENV_OPENAI_API_KEY" || cfg.OpenAI.APIKey != "dotenv-secret" || cfg.OpenAI.BaseURL != "https://dotenv.invalid/v1" {
-		t.Fatalf(".env did not provide OpenAI config: %#v", cfg.OpenAI)
+	if cfg.OpenAI.Model != "gpt-from-file" || cfg.OpenAI.APIKeyEnv != "TEST_OPENAI_API_KEY" || cfg.OpenAI.APIKey != "dotenv-secret" || cfg.OpenAI.BaseURL != "https://file.invalid/v1" {
+		t.Fatalf(".env did not exclusively provide API key: %#v", cfg.OpenAI)
 	}
-	if cfg.Session.Dir != "/tmp/dotenv-sessions" || cfg.Agent.MaxIterations != 13 || !cfg.Agent.UnsafeDebugData {
-		t.Fatalf(".env did not provide config: %#v", cfg)
+	if cfg.Database.Run.URL != "postgres://file.invalid/basetion" || cfg.Session.Dir != "/tmp/file-sessions" || cfg.Agent.MaxIterations != 7 || !cfg.Agent.UnsafeDebugData {
+		t.Fatalf(".env overrode TOML config: %#v", cfg)
 	}
 }
 
-func TestProcessEnvironmentOverridesDotEnv(t *testing.T) {
+func TestProcessAPIKeyOverridesDotEnv(t *testing.T) {
 	clearConfigEnvironment(t)
-	t.Setenv("OPENAI_MODEL", "gpt-from-process")
-	t.Setenv("OPENAI_API_KEY_ENV", "ENV_OPENAI_API_KEY")
-	t.Setenv("ENV_OPENAI_API_KEY", "process-secret")
-	dotenvPath := writeDotEnv(t, `OPENAI_MODEL=gpt-from-dotenv
-OPENAI_API_KEY_ENV=DOTENV_OPENAI_API_KEY
-ENV_OPENAI_API_KEY=dotenv-secret
-DOTENV_OPENAI_API_KEY=other-dotenv-secret
-`)
+	t.Setenv("TEST_OPENAI_API_KEY", "process-secret")
+	dotenvPath := writeDotEnv(t, "TEST_OPENAI_API_KEY=dotenv-secret\n")
 
 	cfg, err := loadFiles(writeConfig(t, validTOML), dotenvPath)
 	if err != nil {
 		t.Fatalf("loadFiles() error = %v", err)
 	}
-	if cfg.OpenAI.Model != "gpt-from-process" || cfg.OpenAI.APIKeyEnv != "ENV_OPENAI_API_KEY" || cfg.OpenAI.APIKey != "process-secret" {
+	if cfg.OpenAI.Model != "gpt-from-file" || cfg.OpenAI.APIKeyEnv != "TEST_OPENAI_API_KEY" || cfg.OpenAI.APIKey != "process-secret" {
 		t.Fatalf("process environment did not override .env: %#v", cfg.OpenAI)
 	}
 }
@@ -210,36 +235,74 @@ func TestLoadFileRejectsMissingAndInvalidFiles(t *testing.T) {
 	}
 }
 
-func TestLoadFileRejectsInvalidEnvironmentTypes(t *testing.T) {
-	t.Run("integer", func(t *testing.T) {
-		clearConfigEnvironment(t)
-		t.Setenv("TEST_OPENAI_API_KEY", "secret")
-		t.Setenv("BASETION_MAX_ITERATIONS", "nope")
-		if _, err := loadWithoutDotEnv(t, validTOML); err == nil || !strings.Contains(err.Error(), "decode configuration file") {
-			t.Fatalf("invalid environment integer error = %v", err)
-		}
-	})
-
-	t.Run("boolean", func(t *testing.T) {
-		clearConfigEnvironment(t)
-		t.Setenv("TEST_OPENAI_API_KEY", "secret")
-		t.Setenv("BASETION_UNSAFE_DEBUG_DATA", "nope")
-		if _, err := loadWithoutDotEnv(t, validTOML); err == nil || !strings.Contains(err.Error(), "decode configuration file") {
-			t.Fatalf("invalid environment boolean error = %v", err)
-		}
-	})
-}
-
 func TestLoadFileRejectsMissingRequiredValues(t *testing.T) {
 	clearConfigEnvironment(t)
 	contents := `[openai]
 model = ""
 api_key_env = ""
+
+[database.run]
+mode = "fixed"
+url = ""
+
+[database.dev]
+mode = "temporary"
+admin_url = ""
+temporary_prefix = "Bad-Prefix"
 `
 
 	_, err := loadWithoutDotEnv(t, contents)
-	if err == nil || !strings.Contains(err.Error(), "openai.model") || !strings.Contains(err.Error(), "openai.api_key_env") {
+	if err == nil || !strings.Contains(err.Error(), "openai.model") || !strings.Contains(err.Error(), "openai.api_key_env") || !strings.Contains(err.Error(), "database.run.url") || !strings.Contains(err.Error(), "database.dev.admin_url") || !strings.Contains(err.Error(), "temporary_prefix") {
 		t.Fatalf("required values error = %v", err)
+	}
+}
+
+func TestDatabaseProfileValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  DatabaseConfig
+		message string
+	}{
+		{
+			name: "run must be fixed",
+			config: DatabaseConfig{
+				Run: DatabaseProfileConfig{Mode: DatabaseModeTemporary, AdminURL: "postgres://admin/postgres", TemporaryPrefix: "test"},
+				Dev: DatabaseProfileConfig{Mode: DatabaseModeFixed, URL: "postgres://dev/db"},
+			},
+			message: "database.run.mode must be fixed",
+		},
+		{
+			name: "unknown dev mode",
+			config: DatabaseConfig{
+				Run: DatabaseProfileConfig{Mode: DatabaseModeFixed, URL: "postgres://run/db"},
+				Dev: DatabaseProfileConfig{Mode: "other"},
+			},
+			message: "database.dev.mode must be fixed or temporary",
+		},
+		{
+			name: "fixed fields are exclusive",
+			config: DatabaseConfig{
+				Run: DatabaseProfileConfig{Mode: DatabaseModeFixed, URL: "postgres://run/db"},
+				Dev: DatabaseProfileConfig{Mode: DatabaseModeFixed, URL: "postgres://dev/db", TemporaryPrefix: "test"},
+			},
+			message: "only valid in temporary mode",
+		},
+		{
+			name: "temporary fields are exclusive",
+			config: DatabaseConfig{
+				Run: DatabaseProfileConfig{Mode: DatabaseModeFixed, URL: "postgres://run/db"},
+				Dev: DatabaseProfileConfig{Mode: DatabaseModeTemporary, URL: "postgres://dev/db", AdminURL: "postgres://admin/postgres", TemporaryPrefix: "test"},
+			},
+			message: "url is only valid in fixed mode",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.config.Validate()
+			if err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("Validate() error=%v, want %q", err, test.message)
+			}
+		})
 	}
 }
 

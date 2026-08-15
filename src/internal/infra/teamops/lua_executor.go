@@ -9,6 +9,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/naifenmizuha/basetion/src/internal/domain/player"
+	"github.com/naifenmizuha/basetion/src/internal/domain/roster"
 	luadomain "github.com/naifenmizuha/basetion/src/internal/domain/teamops"
 	lua "github.com/yuin/gopher-lua"
 )
@@ -46,9 +48,22 @@ func DefaultLimits() Limits {
 
 type LuaExecutor struct {
 	limits Limits
+	roster luadomain.RosterReader
 }
 
-func NewLuaExecutor(limits Limits) (*LuaExecutor, error) {
+type Option func(*LuaExecutor) error
+
+func WithRosterReader(reader luadomain.RosterReader) Option {
+	return func(executor *LuaExecutor) error {
+		if reader == nil {
+			return errors.New("roster reader is required")
+		}
+		executor.roster = reader
+		return nil
+	}
+}
+
+func NewLuaExecutor(limits Limits, options ...Option) (*LuaExecutor, error) {
 	if limits.Timeout <= 0 {
 		return nil, errors.New("lua timeout must be positive")
 	}
@@ -58,7 +73,20 @@ func NewLuaExecutor(limits Limits) (*LuaExecutor, error) {
 	if limits.CallStackSize <= 0 || limits.RegistrySize < 128 || limits.RegistryMax < limits.RegistrySize {
 		return nil, errors.New("invalid lua stack or registry limits")
 	}
-	return &LuaExecutor{limits: limits}, nil
+	executor := &LuaExecutor{limits: limits}
+	for _, option := range options {
+		if err := option(executor); err != nil {
+			return nil, err
+		}
+	}
+	return executor, nil
+}
+
+func (e *LuaExecutor) AvailableModules() []string {
+	if e.roster == nil {
+		return nil
+	}
+	return []string{"roster"}
 }
 
 type nullValue struct{}
@@ -70,7 +98,8 @@ type converter struct {
 	elements       int
 }
 
-func (e *LuaExecutor) Execute(ctx context.Context, program string) (any, error) {
+func (e *LuaExecutor) Execute(ctx context.Context, query luadomain.Query) (any, error) {
+	program := query.Program
 	if len(program) > e.limits.MaxSourceBytes {
 		return nil, fmt.Errorf("lua source exceeds %d bytes", e.limits.MaxSourceBytes)
 	}
@@ -92,7 +121,10 @@ func (e *LuaExecutor) Execute(ctx context.Context, program string) (any, error) 
 		return nil, fmt.Errorf("initialize lua libraries: %w", err)
 	}
 	explicitArrays := make(map[*lua.LTable]struct{})
-	teamops := newTeamOpsProxy(state, explicitArrays)
+	teamops, err := e.newTeamOpsProxy(runCtx, state, explicitArrays, query.Modules)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := state.DoString(program); err != nil {
 		return nil, normalizeExecutionError(runCtx, err)
@@ -170,7 +202,7 @@ func removeTableFields(state *lua.LState, global string, fields ...string) {
 	}
 }
 
-func newTeamOpsProxy(state *lua.LState, explicitArrays map[*lua.LTable]struct{}) *lua.LUserData {
+func (e *LuaExecutor) newTeamOpsProxy(ctx context.Context, state *lua.LState, explicitArrays map[*lua.LTable]struct{}, modules []string) (*lua.LUserData, error) {
 	backing := state.NewTable()
 	backing.RawSetString("array", state.NewFunction(func(state *lua.LState) int {
 		if state.GetTop() != 0 {
@@ -185,6 +217,17 @@ func newTeamOpsProxy(state *lua.LState, explicitArrays map[*lua.LTable]struct{})
 	null := state.NewUserData()
 	null.Value = nullValue{}
 	backing.RawSetString("null", null)
+	for _, module := range modules {
+		switch module {
+		case "roster":
+			if e.roster == nil {
+				return nil, errors.New("roster module is unavailable")
+			}
+			backing.RawSetString("roster", newRosterProxy(ctx, state, e.roster, explicitArrays))
+		default:
+			return nil, fmt.Errorf("unsupported lua module %q", module)
+		}
+	}
 
 	proxy := state.NewUserData()
 	proxy.Value = struct{ name string }{name: "teamops"}
@@ -196,7 +239,136 @@ func newTeamOpsProxy(state *lua.LState, explicitArrays map[*lua.LTable]struct{})
 	}))
 	meta.RawSetString("__metatable", lua.LFalse)
 	state.SetMetatable(proxy, meta)
+	return proxy, nil
+}
+
+var positionNames = map[string]player.PositionFlags{
+	"pitcher":     player.PositionPitcher,
+	"catcher":     player.PositionCatcher,
+	"first_base":  player.PositionFirstBase,
+	"second_base": player.PositionSecondBase,
+	"shortstop":   player.PositionShortstop,
+	"third_base":  player.PositionThirdBase,
+	"outfielder":  player.PositionOutfielder,
+}
+
+func newRosterProxy(ctx context.Context, state *lua.LState, reader luadomain.RosterReader, explicitArrays map[*lua.LTable]struct{}) *lua.LUserData {
+	backing := state.NewTable()
+	backing.RawSetString("teams", state.NewFunction(func(state *lua.LState) int {
+		activeOnly := false
+		if state.GetTop() > 1 {
+			state.RaiseError("roster.teams accepts at most one filter table")
+		}
+		if state.GetTop() == 1 {
+			filter := state.CheckTable(1)
+			if value := filter.RawGetString("active"); value != lua.LNil {
+				activeOnly = bool(lua.LVAsBool(value))
+			}
+		}
+		teams, err := reader.ListTeams(ctx, activeOnly)
+		if err != nil {
+			state.RaiseError("list roster teams: %v", err)
+			return 0
+		}
+		result := state.NewTable()
+		explicitArrays[result] = struct{}{}
+		for _, current := range teams {
+			entry := state.NewTable()
+			entry.RawSetString("id", lua.LString(current.ID))
+			entry.RawSetString("name", lua.LString(current.Name))
+			entry.RawSetString("active", lua.LBool(current.Active))
+			result.Append(entry)
+		}
+		state.Push(result)
+		return 1
+	}))
+	backing.RawSetString("players", state.NewFunction(func(state *lua.LState) int {
+		if state.GetTop() != 1 {
+			state.RaiseError("roster.players requires one filter table")
+			return 0
+		}
+		filterTable := state.CheckTable(1)
+		teamID := string(lua.LVAsString(filterTable.RawGetString("team_id")))
+		if teamID == "" {
+			state.RaiseError("roster.players requires team_id")
+			return 0
+		}
+		filter := luadomain.RosterPlayerFilter{TeamID: teamID}
+		if value := filterTable.RawGetString("on_date"); value != lua.LNil {
+			parsed, err := roster.ParseDate(string(lua.LVAsString(value)))
+			if err != nil {
+				state.RaiseError("invalid roster on_date: %v", err)
+				return 0
+			}
+			filter.OnDate = &parsed
+		}
+		if value := filterTable.RawGetString("position_any"); value != lua.LNil {
+			positions, ok := value.(*lua.LTable)
+			if !ok {
+				state.RaiseError("position_any must be an array")
+				return 0
+			}
+			positions.ForEach(func(_, value lua.LValue) {
+				flag, exists := positionNames[string(lua.LVAsString(value))]
+				if !exists {
+					state.RaiseError("unknown roster position %q", value.String())
+					return
+				}
+				filter.PositionAny |= flag
+			})
+		}
+		players, err := reader.ListPlayers(ctx, filter)
+		if err != nil {
+			state.RaiseError("list roster players: %v", err)
+			return 0
+		}
+		result := state.NewTable()
+		explicitArrays[result] = struct{}{}
+		for _, current := range players {
+			result.Append(rosterPlayerToLua(state, current, explicitArrays))
+		}
+		state.Push(result)
+		return 1
+	}))
+	proxy := state.NewUserData()
+	proxy.Value = struct{ name string }{name: "roster"}
+	meta := state.NewTable()
+	meta.RawSetString("__index", backing)
+	meta.RawSetString("__newindex", state.NewFunction(func(state *lua.LState) int { state.RaiseError("roster is read-only"); return 0 }))
+	meta.RawSetString("__metatable", lua.LFalse)
+	state.SetMetatable(proxy, meta)
 	return proxy
+}
+
+func rosterPlayerToLua(state *lua.LState, current luadomain.RosterPlayerView, explicitArrays map[*lua.LTable]struct{}) *lua.LTable {
+	entry := state.NewTable()
+	entry.RawSetString("membership_id", lua.LString(current.MembershipID))
+	entry.RawSetString("team_id", lua.LString(current.TeamID))
+	entry.RawSetString("player_id", lua.LString(current.PlayerID))
+	entry.RawSetString("name", lua.LString(current.Name))
+	entry.RawSetString("jersey_number", lua.LNumber(current.JerseyNumber))
+	entry.RawSetString("batting_hands", stringsToLua(state, current.BattingHands, explicitArrays))
+	entry.RawSetString("throwing_hands", stringsToLua(state, current.ThrowingHands, explicitArrays))
+	entry.RawSetString("positions", stringsToLua(state, current.Positions, explicitArrays))
+	entry.RawSetString("joined_at", lua.LString(current.JoinedAt))
+	if current.LeftAt == nil {
+		null := state.NewUserData()
+		null.Value = nullValue{}
+		entry.RawSetString("left_at", null)
+	} else {
+		entry.RawSetString("left_at", lua.LString(*current.LeftAt))
+	}
+	entry.RawSetString("active", lua.LBool(current.Active))
+	return entry
+}
+
+func stringsToLua(state *lua.LState, values []string, explicitArrays map[*lua.LTable]struct{}) *lua.LTable {
+	result := state.NewTable()
+	explicitArrays[result] = struct{}{}
+	for _, value := range values {
+		result.Append(lua.LString(value))
+	}
+	return result
 }
 
 func (c *converter) convert(value lua.LValue, depth int) (any, error) {
