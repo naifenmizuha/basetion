@@ -9,7 +9,7 @@
 
 `src/cmd/basetion/main.go` 使用后台 Context 调用 `bootstrap.Execute`，传入命令行参数、标准输出和标准错误，并以返回值作为进程退出码。业务依赖不在 main 包中构造。
 
-仓库根目录的 `justfile` 提供默认的 `run` 配方；`run` 和 `dev` 分别选择 TOML 的数据库 profile，`testplayer` 使用 dev profile 演示名单查询，`test` 运行完整 Go 测试。`deps-up`/`deps-down` 单独管理 Compose 中的 PostgreSQL 依赖，应用命令不会隐式启动或停止容器。
+仓库根目录的 `justfile` 通过 `app`、`dep` 与 `test` 三个 Just 模块分别组织应用、长期运行依赖和测试命令；模块源文件位于 `just/`。可使用 `just app run|dev`、`just dep up|down` 与 `just test all|player` 调用，模块命令会切换到仓库根目录后再执行；不再提供扁平兼容入口。`dep` 使用 Podman Compose 管理 PostgreSQL，镜像使用完整 Docker Hub 引用，数据卷带 `:Z` SELinux 标签；应用命令不会隐式启动或停止该依赖。
 
 ## CLI 协议
 
