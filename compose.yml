@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: docker.io/library/postgres:17-alpine
+    environment:
+      POSTGRES_DB: basetion
+      POSTGRES_USER: basetion
+      POSTGRES_PASSWORD: basetion
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U basetion -d basetion"]
+      interval: 1s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - postgres-data:/var/lib/postgresql/data:Z
+
+volumes:
+  postgres-data:
