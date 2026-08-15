@@ -8,6 +8,6 @@
 
 当前显式注册一个由 Eino `InferTool` 从 Go 输入输出类型生成协议的业务工具：
 
-- `teamops`：以单一工具提供 `describe` 和 `query` 两种模式。`describe` 按需返回 Lua 运行时和 TeamOps 模块目录；`query` 执行定义了 `main(teamops)` 的受限 Lua 5.1 程序。工具协议将 `mode` 限定为两个枚举值，所有校验和执行交给 TeamOps 领域服务。
+- `teamops`：以单一工具提供 `describe` 和 `query` 两种模式。`describe` 按需返回 Lua 运行时和 TeamOps 模块目录；`query` 执行定义了 `main(teamops)` 的受限 Lua 5.1 程序。工具协议将 `mode` 限定为两个枚举值；工具层负责模式分派、非法模式以及 `describe` 携带 `program` 等协议校验，TeamOps 领域服务负责模块选择、查询程序校验与执行。
 
 构造工具时 TeamOps 领域服务不能为空。领域错误直接返回给 Agent 工具运行链路，由上层事件与回调机制处理。`skill` 工具由 Harness 中的 Skill Middleware 动态提供，不属于本工具适配目录。

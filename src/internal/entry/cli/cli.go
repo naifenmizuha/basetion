@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,7 +14,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-const usage = "用法: basetion --session-id <ID> <提示词>"
+const usage = "用法: basetion [--session-id <ID>] <提示词>"
 
 // Conversation is the entry-facing application use-case contract.
 type Conversation interface {
@@ -33,15 +35,33 @@ func Execute(ctx context.Context, args []string, conversation Conversation, stdo
 		return 2
 	}
 	prompt := strings.TrimSpace(strings.Join(flags.Args(), " "))
-	if strings.TrimSpace(*sessionID) == "" || prompt == "" {
+	if prompt == "" {
 		fmt.Fprintln(stderr, usage)
 		return 2
 	}
-	if err := Render(stdout, conversation.Run(ctx, *sessionID, prompt)); err != nil {
+	resolvedSessionID := strings.TrimSpace(*sessionID)
+	if resolvedSessionID == "" {
+		var err error
+		resolvedSessionID, err = generateSessionID()
+		if err != nil {
+			fmt.Fprintf(stderr, "创建会话 ID 失败: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "[会话] 新建 %s\n", resolvedSessionID)
+	}
+	if err := Render(stdout, conversation.Run(ctx, resolvedSessionID, prompt)); err != nil {
 		fmt.Fprintf(stderr, "执行失败: %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+func generateSessionID() (string, error) {
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return "", err
+	}
+	return "session-" + hex.EncodeToString(random[:]), nil
 }
 
 // Render writes Eino events in order without flattening their semantic block types.

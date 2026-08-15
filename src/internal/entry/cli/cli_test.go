@@ -96,6 +96,28 @@ func TestExecuteEndToEndAndContinuesSession(t *testing.T) {
 	}
 }
 
+func TestExecuteCreatesSessionWhenIDIsOmitted(t *testing.T) {
+	store := &cliStore{sessions: make(map[string]conversation.Session)}
+	service := newCLIConversation(t, &cliAgent{}, store)
+	var out, stderr bytes.Buffer
+	if code := Execute(context.Background(), []string{"新会话"}, service, &out, &stderr); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(out.String(), "[会话] 新建 session-") {
+		t.Fatalf("output %q does not report the new session ID", out.String())
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.sessions) != 1 {
+		t.Fatalf("saved sessions=%d, want 1", len(store.sessions))
+	}
+	for id, session := range store.sessions {
+		if !strings.HasPrefix(id, "session-") || session.ID != id {
+			t.Fatalf("saved session ID=%q session.ID=%q", id, session.ID)
+		}
+	}
+}
+
 func TestExecuteRejectsInputAndReportsAgentFailure(t *testing.T) {
 	var out, stderr bytes.Buffer
 	if code := Execute(context.Background(), []string{"only prompt"}, nil, &out, &stderr); code != 1 {
@@ -104,7 +126,7 @@ func TestExecuteRejectsInputAndReportsAgentFailure(t *testing.T) {
 	agent := &cliAgent{err: errors.New("boom")}
 	service := newCLIConversation(t, agent, &cliStore{sessions: make(map[string]conversation.Session)})
 	stderr.Reset()
-	if code := Execute(context.Background(), []string{"prompt"}, service, &out, &stderr); code != 2 || !strings.Contains(stderr.String(), usage) {
+	if code := Execute(context.Background(), nil, service, &out, &stderr); code != 2 || !strings.Contains(stderr.String(), usage) {
 		t.Fatalf("invalid code=%d stderr=%q", code, stderr.String())
 	}
 	stderr.Reset()
