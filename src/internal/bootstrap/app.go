@@ -11,14 +11,21 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/naifenmizuha/basetion/src/internal/application/conversation"
 	"github.com/naifenmizuha/basetion/src/internal/config"
-	domainteamops "github.com/naifenmizuha/basetion/src/internal/domain/teamops"
+	"github.com/naifenmizuha/basetion/src/internal/domain/player"
+	"github.com/naifenmizuha/basetion/src/internal/domain/roster"
+	"github.com/naifenmizuha/basetion/src/internal/domain/team"
+	domainteamquery "github.com/naifenmizuha/basetion/src/internal/domain/teamquery"
 	"github.com/naifenmizuha/basetion/src/internal/entry/cli"
 	"github.com/naifenmizuha/basetion/src/internal/harness"
 	infrapostgres "github.com/naifenmizuha/basetion/src/internal/infra/postgres"
 	infrasession "github.com/naifenmizuha/basetion/src/internal/infra/session"
-	infrateamops "github.com/naifenmizuha/basetion/src/internal/infra/teamops"
+	infrateamquery "github.com/naifenmizuha/basetion/src/internal/infra/teamquery"
 	basetiontools "github.com/naifenmizuha/basetion/src/internal/tools"
 )
+
+type wallClock struct{}
+
+func (wallClock) Now() time.Time { return time.Now() }
 
 // Execute assembles the first vertical slice and invokes the CLI adapter.
 func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exitCode int) {
@@ -73,19 +80,40 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 			}
 		}
 	}()
-	teamOpsExecutor, err := infrateamops.NewLuaExecutor(infrateamops.DefaultLimits(), infrateamops.WithRosterReader(database.Store.RosterReader()))
+	teamQueryExecutor, err := infrateamquery.NewLuaExecutor(infrateamquery.DefaultLimits(), infrateamquery.WithRosterReader(database.Store.RosterReader()))
 	if err != nil {
-		fmt.Fprintf(stderr, "初始化 TeamOps Lua 执行器失败: %v\n", err)
+		fmt.Fprintf(stderr, "初始化球队查询 Lua 执行器失败: %v\n", err)
 		return 1
 	}
-	teamOpsService, err := domainteamops.NewService(teamOpsExecutor)
+	teamQueryService, err := domainteamquery.NewService(teamQueryExecutor)
 	if err != nil {
-		fmt.Fprintf(stderr, "初始化 TeamOps 领域服务失败: %v\n", err)
+		fmt.Fprintf(stderr, "初始化球队查询领域服务失败: %v\n", err)
 		return 1
 	}
-	teamOpsTool, err := basetiontools.NewTeamOps(teamOpsService)
+	teamQueryTool, err := basetiontools.NewTeamQuery(teamQueryService)
 	if err != nil {
-		fmt.Fprintf(stderr, "初始化 TeamOps 工具失败: %v\n", err)
+		fmt.Fprintf(stderr, "初始化球队查询工具失败: %v\n", err)
+		return 1
+	}
+	clock := wallClock{}
+	teamService, err := team.NewService(database.Store.Teams(), clock)
+	if err != nil {
+		fmt.Fprintf(stderr, "初始化球队写入服务失败: %v\n", err)
+		return 1
+	}
+	playerService, err := player.NewService(database.Store.Players(), clock)
+	if err != nil {
+		fmt.Fprintf(stderr, "初始化球员写入服务失败: %v\n", err)
+		return 1
+	}
+	rosterService, err := roster.NewService(database.Store, clock)
+	if err != nil {
+		fmt.Fprintf(stderr, "初始化名单写入服务失败: %v\n", err)
+		return 1
+	}
+	teamModifyTool, err := basetiontools.NewTeamModify(teamService, playerService, rosterService)
+	if err != nil {
+		fmt.Fprintf(stderr, "初始化球队修改工具失败: %v\n", err)
 		return 1
 	}
 	agenticModel, err := harness.NewAgenticModel(ctx)
@@ -93,7 +121,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 		fmt.Fprintf(stderr, "初始化 AgenticModel 失败: %v\n", err)
 		return 1
 	}
-	runtime, err := harness.NewRuntime(ctx, agenticModel, []tool.BaseTool{teamOpsTool}, logger)
+	runtime, err := harness.NewRuntime(ctx, agenticModel, []tool.BaseTool{teamQueryTool, teamModifyTool}, logger)
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化 Agent Harness 失败: %v\n", err)
 		return 1

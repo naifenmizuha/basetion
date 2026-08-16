@@ -15,7 +15,7 @@ import (
 	"github.com/naifenmizuha/basetion/src/internal/domain/player"
 	"github.com/naifenmizuha/basetion/src/internal/domain/roster"
 	"github.com/naifenmizuha/basetion/src/internal/domain/team"
-	"github.com/naifenmizuha/basetion/src/internal/domain/teamops"
+	"github.com/naifenmizuha/basetion/src/internal/domain/teamquery"
 )
 
 type fixedClock struct{ now time.Time }
@@ -83,14 +83,14 @@ func TestPostgresDevelopmentFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(teams) != 1 || teams[0].Name != "Basetion Demo" {
+	if len(teams) != 1 || teams[0].Name != "季汉队" {
 		t.Fatalf("teams=%#v", teams)
 	}
-	players, err := store.RosterReader().ListPlayers(context.Background(), teamops.RosterPlayerFilter{TeamID: teams[0].ID})
+	players, err := store.RosterReader().ListPlayers(context.Background(), teamquery.RosterPlayerFilter{TeamID: teams[0].ID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(players) != 2 || players[0].Name != "陈捕手" || players[1].Name != "林一郎" {
+	if len(players) != 20 || players[0].Name != "张飞" || players[19].Name != "庞统" {
 		t.Fatalf("players=%#v", players)
 	}
 }
@@ -181,7 +181,7 @@ func TestPostgresConcurrentJerseyAssignmentAndRead(t *testing.T) {
 	if successes != 1 || occupied != 1 {
 		t.Fatalf("successes=%d occupied=%d errors=%v", successes, occupied, errorsFound)
 	}
-	views, err := store.RosterReader().ListPlayers(context.Background(), teamops.RosterPlayerFilter{TeamID: string(teamID)})
+	views, err := store.RosterReader().ListPlayers(context.Background(), teamquery.RosterPlayerFilter{TeamID: string(teamID)})
 	if err != nil {
 		t.Fatal(err)
 	}

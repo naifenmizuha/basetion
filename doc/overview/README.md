@@ -14,10 +14,11 @@ src/cmd/basetion
     -> src/internal/entry/cli
       -> src/internal/application/conversation
         -> src/internal/harness (Eino Runner + Skill Middleware)
-          -> skills/{project-knowledge,manage-teamops}
+          -> skills/{project-knowledge,manage-team}
           -> src/internal/tools
-            -> src/internal/domain/teamops
-              <- src/internal/infra/teamops <- src/internal/infra/postgres
+            -> src/internal/domain/teamquery
+              <- src/internal/infra/teamquery <- src/internal/infra/postgres
+            -> src/internal/domain/{team,player,roster} <- src/internal/infra/postgres
         -> src/internal/infra/session
 ```
 
@@ -31,13 +32,13 @@ src/cmd/basetion
 - [`harness.md`](harness.md)：AgenticModel、Skill Middleware、Eino Agent/Runner 和生命周期回调。
 - [`tools.md`](tools.md)：模型工具协议适配。
 - [`roster-domain.md`](roster-domain.md)：球员、球队、名单实体、领域服务和事务端口。
-- [`teamops-domain.md`](teamops-domain.md)：TeamOps 可编程只读查询契约与名单读取端口。
+- [`teamquery-domain.md`](teamquery-domain.md)：可编程只读球队查询契约与名单读取端口。
 - [`infrastructure.md`](infrastructure.md)：Session 文件存储、PostgreSQL 存储与 Lua 查询运行时。
 
 ## 跨模块运行流程
 
 1. `src/cmd/basetion` 将进程参数和标准流交给组合根。
-2. 组合根解析 run/dev profile 并加载配置，创建或连接 PostgreSQL、执行迁移，再创建 Session 存储、TeamOps Lua 执行器、领域服务、工具、模型、Harness 和会话服务。
+2. 组合根解析 run/dev profile 并加载配置，创建或连接 PostgreSQL、执行迁移，再创建 Session 存储、球队查询 Lua 执行器、读写领域服务、两个球队工具、模型、Harness 和会话服务。
 3. CLI 校验 `--session-id` 与提示词，调用会话服务并消费异步事件。
 4. 会话服务按 Session ID 串行化运行，载入已完成历史并调用 Eino Runner。
 5. Runner 流式产生 reasoning、文本、工具调用、工具结果和动作，CLI 按语义块展示。
@@ -46,7 +47,7 @@ src/cmd/basetion
 ## 当前边界
 
 - 仅实现 CLI 入口，没有 HTTP 或机器人入口。
-- 项目知识和 TeamOps 操作规范由仓库根目录的两个必需 Skill 按需加载；当前不提供通用文件读取或生产知识检索。
+- 项目知识和球队管理规范由仓库根目录的两个必需 Skill 按需加载；当前不提供通用文件读取或生产知识检索。
 - 业务 Session 使用本地 JSON 快照；Eino Checkpoint 尚未启用。
 - 模型使用兼容 OpenAI Responses API 的 Eino `AgenticModel` 实现。
-- TeamOps 当前接入只读 `roster` 模块；比赛、阵容、训练和分析模块仍为不可用占位。
+- `team_query` 当前接入只读 `roster` 模块；`team_modify` 支持球队、球员和名单的七项预定义操作。比赛、阵容、训练和分析查询模块仍为不可用占位。

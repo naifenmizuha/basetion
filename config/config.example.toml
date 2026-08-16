@@ -2,6 +2,8 @@
 model = "gpt-5"
 api_key_env = "OPENAI_API_KEY"
 base_url = "https://api.openai.com/v1"
+reasoning_effort = "high"
+reasoning_summary = "detailed"
 
 [database.run]
 mode = "fixed"

@@ -7,7 +7,7 @@
 
 ## 模型与运行时
 
-`NewAgenticModel` 从已初始化的全局配置快照读取模型名、API Key 和可选 Base URL，创建 Eino OpenAI Responses `AgenticModel`。
+`NewAgenticModel` 从已初始化的全局配置快照读取模型名、API Key、可选 Base URL、reasoning effort 和 reasoning summary，创建 Eino OpenAI Responses `AgenticModel`。
 
 `NewRuntime` 从同一配置快照读取最大迭代次数和调试开关，构造一个 `TypedChatModelAgent[*schema.AgenticMessage]`，注册工具、嵌入式系统指令和 Skill Middleware，再包装为启用流式输出的 `TypedRunner`。两个构造函数均不接收配置参数，要求 Bootstrap 先完成配置初始化。Harness 直接组合 Eino 的具体类型，不额外定义第二套运行时抽象。
 
@@ -18,9 +18,9 @@ Skill Middleware 使用 Eino Ext 本地文件 Backend，从进程当前工作目
 当前必需 Skill 为：
 
 - `project-knowledge`：提供 Basetion 定位、当前能力、六层职责、Session/Checkpoint 区别和明确限制。
-- `manage-teamops`：规定球队结构化事实必须先 `describe`、确认模块可用后再执行最窄只读 `query`，并约束失败与不可用状态处理。
+- `manage-team`：规定先用 `team_query` 获取事实与稳定 ID，再按需发现并经用户确认后调用 `team_modify`，并约束失败与不可用状态处理。
 
-Skill 中间件动态提供模型可见的 `skill` 工具；业务工具列表只显式注册 `teamops`。两个 Skill 均为自包含单文件，当前不使用引用文件或通用文件读取能力。
+Skill 中间件动态提供模型可见的 `skill` 工具；业务工具列表显式注册 `team_query` 和 `team_modify`。两个 Skill 均为自包含单文件，当前不使用引用文件或通用文件读取能力。
 
 ## 生命周期回调
 

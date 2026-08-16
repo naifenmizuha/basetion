@@ -4,7 +4,7 @@
 
 - `src/internal/infra/session`
 - `src/internal/infra/postgres`
-- `src/internal/infra/teamops`
+- `src/internal/infra/teamquery`
 
 ## Session 文件存储
 
@@ -14,12 +14,12 @@
 
 ## PostgreSQL 存储
 
-`Store` 使用 pgx 连接 PostgreSQL，并按文件名顺序执行内嵌迁移；迁移账本与 advisory lock 防止重复或并发执行。它实现球员、球队 Repository 以及名单 `UnitOfWork`，名单写操作在同一事务中锁定相关实体，并结合数据库约束和乐观版本号维护当前球衣唯一、效力期不重叠等规则。只读 `RosterReader` 以稳定排序返回 TeamOps 所需投影，`AuditRoster` 可检查孤立引用、重复当前球衣和重叠效力期。
+`Store` 使用 pgx 连接 PostgreSQL，并按文件名顺序执行内嵌迁移；迁移账本与 advisory lock 防止重复或并发执行。它实现球员、球队 Repository 以及名单 `UnitOfWork`，名单写操作在同一事务中锁定相关实体，并结合数据库约束和乐观版本号维护当前球衣唯一、效力期不重叠等规则。只读 `RosterReader` 以稳定排序返回球队查询投影，`AuditRoster` 可检查孤立引用、重复当前球衣和重叠效力期。开发 fixture 提供季汉队及二十名当前球员，供查询与修改演示使用。
 
 `ManagedStore` 支持固定库和临时库两种生命周期。固定库只拥有连接池；临时模式通过管理连接创建带随机后缀的数据库，执行迁移，可选载入内嵌开发 fixture，并在关闭时终止遗留连接后删除数据库。仓库根目录 `compose.yml` 只部署持久 PostgreSQL 依赖，不与应用或测试命令隐式绑定。
 
-## TeamOps Lua 运行时
+## Team Query Lua 运行时
 
-`LuaExecutor` 使用 GopherLua 为每次查询创建独立 State，只开放裁剪后的 base、`table`、`string` 和 `math` 能力。文件、系统、模块加载、动态代码、调试、协程、channel、打印、随机数和元表修改均不可用。`teamops` 以只读 userdata 代理暴露 `array()` 和 `null`，脚本无法替换宿主能力。注入名单读取器后还会按查询声明暴露只读 `roster.teams` 和 `roster.players`；未声明、不可用或未知模块不会进入脚本环境。
+`LuaExecutor` 使用 GopherLua 为每次查询创建独立 State，只开放裁剪后的 base、`table`、`string` 和 `math` 能力。文件、系统、模块加载、动态代码、调试、协程、channel、打印、随机数和元表修改均不可用。入口参数 `team` 以只读 userdata 代理暴露 `array()` 和 `null`，脚本无法替换宿主能力。注入名单读取器后还会按查询声明暴露只读 `roster.teams` 和 `roster.players`；未声明、不可用或未知模块不会进入脚本环境。
 
 默认限制为 2 秒、32 KiB 源码、32 层返回深度、10,000 个 table 元素和 256 KiB JSON 结果。返回转换支持 nil、布尔、有限数值、UTF-8 字符串与 table；连续正整数键映射为数组，字符串键映射为对象，并拒绝循环、稀疏或混合键及不可序列化值。

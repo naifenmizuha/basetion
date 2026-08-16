@@ -1,4 +1,4 @@
-package teamops
+package teamquery
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 
 	"github.com/naifenmizuha/basetion/src/internal/domain/player"
 	"github.com/naifenmizuha/basetion/src/internal/domain/roster"
-	luadomain "github.com/naifenmizuha/basetion/src/internal/domain/teamops"
+	querydomain "github.com/naifenmizuha/basetion/src/internal/domain/teamquery"
 	lua "github.com/yuin/gopher-lua"
 )
 
@@ -36,7 +36,7 @@ type Limits struct {
 func DefaultLimits() Limits {
 	return Limits{
 		Timeout:        defaultTimeout,
-		MaxSourceBytes: luadomain.MaxProgramBytes,
+		MaxSourceBytes: querydomain.MaxProgramBytes,
 		MaxDepth:       defaultMaxDepth,
 		MaxElements:    defaultMaxElements,
 		MaxResultBytes: defaultMaxResultSize,
@@ -48,12 +48,12 @@ func DefaultLimits() Limits {
 
 type LuaExecutor struct {
 	limits Limits
-	roster luadomain.RosterReader
+	roster querydomain.RosterReader
 }
 
 type Option func(*LuaExecutor) error
 
-func WithRosterReader(reader luadomain.RosterReader) Option {
+func WithRosterReader(reader querydomain.RosterReader) Option {
 	return func(executor *LuaExecutor) error {
 		if reader == nil {
 			return errors.New("roster reader is required")
@@ -98,7 +98,7 @@ type converter struct {
 	elements       int
 }
 
-func (e *LuaExecutor) Execute(ctx context.Context, query luadomain.Query) (any, error) {
+func (e *LuaExecutor) Execute(ctx context.Context, query querydomain.Query) (any, error) {
 	program := query.Program
 	if len(program) > e.limits.MaxSourceBytes {
 		return nil, fmt.Errorf("lua source exceeds %d bytes", e.limits.MaxSourceBytes)
@@ -121,7 +121,7 @@ func (e *LuaExecutor) Execute(ctx context.Context, query luadomain.Query) (any, 
 		return nil, fmt.Errorf("initialize lua libraries: %w", err)
 	}
 	explicitArrays := make(map[*lua.LTable]struct{})
-	teamops, err := e.newTeamOpsProxy(runCtx, state, explicitArrays, query.Modules)
+	team, err := e.newTeamProxy(runCtx, state, explicitArrays, query.Modules)
 	if err != nil {
 		return nil, err
 	}
@@ -131,9 +131,9 @@ func (e *LuaExecutor) Execute(ctx context.Context, query luadomain.Query) (any, 
 	}
 	mainValue := state.GetGlobal("main")
 	if mainValue == lua.LNil || mainValue.Type() != lua.LTFunction {
-		return nil, errors.New("lua program must define main(teamops)")
+		return nil, errors.New("lua program must define main(team)")
 	}
-	if err := state.CallByParam(lua.P{Fn: mainValue, NRet: 1, Protect: true}, teamops); err != nil {
+	if err := state.CallByParam(lua.P{Fn: mainValue, NRet: 1, Protect: true}, team); err != nil {
 		return nil, normalizeExecutionError(runCtx, err)
 	}
 	value := state.Get(-1)
@@ -202,11 +202,11 @@ func removeTableFields(state *lua.LState, global string, fields ...string) {
 	}
 }
 
-func (e *LuaExecutor) newTeamOpsProxy(ctx context.Context, state *lua.LState, explicitArrays map[*lua.LTable]struct{}, modules []string) (*lua.LUserData, error) {
+func (e *LuaExecutor) newTeamProxy(ctx context.Context, state *lua.LState, explicitArrays map[*lua.LTable]struct{}, modules []string) (*lua.LUserData, error) {
 	backing := state.NewTable()
 	backing.RawSetString("array", state.NewFunction(func(state *lua.LState) int {
 		if state.GetTop() != 0 {
-			state.RaiseError("teamops.array does not accept arguments")
+			state.RaiseError("team.array does not accept arguments")
 			return 0
 		}
 		table := state.NewTable()
@@ -230,11 +230,11 @@ func (e *LuaExecutor) newTeamOpsProxy(ctx context.Context, state *lua.LState, ex
 	}
 
 	proxy := state.NewUserData()
-	proxy.Value = struct{ name string }{name: "teamops"}
+	proxy.Value = struct{ name string }{name: "team"}
 	meta := state.NewTable()
 	meta.RawSetString("__index", backing)
 	meta.RawSetString("__newindex", state.NewFunction(func(state *lua.LState) int {
-		state.RaiseError("teamops is read-only")
+		state.RaiseError("team is read-only")
 		return 0
 	}))
 	meta.RawSetString("__metatable", lua.LFalse)
@@ -252,7 +252,7 @@ var positionNames = map[string]player.PositionFlags{
 	"outfielder":  player.PositionOutfielder,
 }
 
-func newRosterProxy(ctx context.Context, state *lua.LState, reader luadomain.RosterReader, explicitArrays map[*lua.LTable]struct{}) *lua.LUserData {
+func newRosterProxy(ctx context.Context, state *lua.LState, reader querydomain.RosterReader, explicitArrays map[*lua.LTable]struct{}) *lua.LUserData {
 	backing := state.NewTable()
 	backing.RawSetString("teams", state.NewFunction(func(state *lua.LState) int {
 		activeOnly := false
@@ -293,7 +293,7 @@ func newRosterProxy(ctx context.Context, state *lua.LState, reader luadomain.Ros
 			state.RaiseError("roster.players requires team_id")
 			return 0
 		}
-		filter := luadomain.RosterPlayerFilter{TeamID: teamID}
+		filter := querydomain.RosterPlayerFilter{TeamID: teamID}
 		if value := filterTable.RawGetString("on_date"); value != lua.LNil {
 			parsed, err := roster.ParseDate(string(lua.LVAsString(value)))
 			if err != nil {
@@ -340,7 +340,7 @@ func newRosterProxy(ctx context.Context, state *lua.LState, reader luadomain.Ros
 	return proxy
 }
 
-func rosterPlayerToLua(state *lua.LState, current luadomain.RosterPlayerView, explicitArrays map[*lua.LTable]struct{}) *lua.LTable {
+func rosterPlayerToLua(state *lua.LState, current querydomain.RosterPlayerView, explicitArrays map[*lua.LTable]struct{}) *lua.LTable {
 	entry := state.NewTable()
 	entry.RawSetString("membership_id", lua.LString(current.MembershipID))
 	entry.RawSetString("team_id", lua.LString(current.TeamID))

@@ -57,7 +57,7 @@ func (a *cliAgent) Run(_ context.Context, input *adk.TypedAgentInput[*schema.Age
 		schema.NewContentBlock(&schema.Reasoning{Text: "先检索"}),
 		schema.NewContentBlock(&schema.FunctionToolCall{CallID: "call-1", Name: "skill", Arguments: `{"skill":"project-knowledge"}`}),
 		schema.NewContentBlock(&schema.FunctionToolResult{CallID: "call-1", Name: "skill", Content: []*schema.FunctionToolResultContentBlock{{Type: schema.FunctionToolResultContentBlockTypeText, Text: &schema.UserInputText{Text: "六层"}}}}),
-		schema.NewContentBlock(&schema.AssistantGenText{Text: "最终回答"}),
+		schema.NewContentBlock(&schema.AssistantGenText{Text: "**最终回答**"}),
 	}}
 	gen.Send(adk.EventFromAgenticMessage(nil, schema.StreamReaderFromArray([]*schema.AgenticMessage{message}), schema.AgenticRoleTypeAssistant))
 	gen.Close()
@@ -82,7 +82,7 @@ func TestExecuteEndToEndAndContinuesSession(t *testing.T) {
 	if code := Execute(context.Background(), []string{"--session-id", "same", "解释", "骨架"}, service, &out, &stderr); code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
-	for _, want := range []string{"[思考] 先检索", "[工具调用] skill call_id=call-1", "[工具结果] skill call_id=call-1: 六层", "最终回答", "[完成]"} {
+	for _, want := range []string{"[思考] 先检索", "[工具调用] skill call_id=call-1", "[工具结果] skill call_id=call-1: 六层", "[回复]", "最终回答", "[完成]"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("output %q does not contain %q", out.String(), want)
 		}
@@ -149,5 +149,68 @@ func TestExtractProfile(t *testing.T) {
 	}
 	if _, _, err := ExtractProfile([]string{"--profile=unknown", "prompt"}); err == nil {
 		t.Fatal("unknown profile accepted")
+	}
+}
+
+func TestRenderPreservesMarkdownWithoutANSIForNonTerminalWriter(t *testing.T) {
+	var out bytes.Buffer
+	if err := Render(&out, eventsFromMessages(&schema.AgenticMessage{
+		Role: schema.AgenticRoleTypeAssistant,
+		ContentBlocks: []*schema.ContentBlock{
+			schema.NewContentBlock(&schema.AssistantGenText{Text: "# 标题\n\n**加粗**\n\n- 条目\n\n```go\nfmt.Println(\"ok\")\n```"}),
+		},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{"[回复]", "标题", "加粗", "条目", "fmt.Println(\"ok\")", "[完成]"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output %q does not contain %q", got, want)
+		}
+	}
+	for _, unwanted := range []string{"\x1b["} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("output %q unexpectedly contains %q", got, unwanted)
+		}
+	}
+	for _, want := range []string{"# 标题", "**加粗**", "```"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output %q does not preserve %q", got, want)
+		}
+	}
+}
+
+func TestRenderAggregatesStreamingReplyChunks(t *testing.T) {
+	var out bytes.Buffer
+	if err := Render(&out, eventsFromMessages(
+		assistantTextMessage("第一段 **加"),
+		assistantTextMessage("粗**"),
+	)); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if count := strings.Count(got, "[回复]"); count != 1 {
+		t.Fatalf("[回复] count=%d output=%q", count, got)
+	}
+	if !strings.Contains(got, "第一段 **加粗**") {
+		t.Fatalf("streamed Markdown was not rendered: %q", got)
+	}
+}
+
+func eventsFromMessages(messages ...*schema.AgenticMessage) *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.AgenticMessage]] {
+	iter, gen := adk.NewAsyncIteratorPair[*adk.TypedAgentEvent[*schema.AgenticMessage]]()
+	for _, message := range messages {
+		gen.Send(adk.EventFromAgenticMessage(nil, schema.StreamReaderFromArray([]*schema.AgenticMessage{message}), schema.AgenticRoleTypeAssistant))
+	}
+	gen.Close()
+	return iter
+}
+
+func assistantTextMessage(text string) *schema.AgenticMessage {
+	return &schema.AgenticMessage{
+		Role: schema.AgenticRoleTypeAssistant,
+		ContentBlocks: []*schema.ContentBlock{
+			schema.NewContentBlock(&schema.AssistantGenText{Text: text}),
+		},
 	}
 }

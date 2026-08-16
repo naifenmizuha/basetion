@@ -13,6 +13,8 @@ const validTOML = `[openai]
 model = "gpt-from-file"
 api_key_env = "TEST_OPENAI_API_KEY"
 base_url = "https://file.invalid/v1"
+reasoning_effort = "medium"
+reasoning_summary = "concise"
 
 [database.run]
 mode = "fixed"
@@ -91,7 +93,7 @@ func TestLoadFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadFile() error = %v", err)
 	}
-	if cfg.OpenAI.Model != "gpt-from-file" || cfg.OpenAI.APIKeyEnv != "TEST_OPENAI_API_KEY" || cfg.OpenAI.APIKey != "file-secret" || cfg.OpenAI.BaseURL != "https://file.invalid/v1" {
+	if cfg.OpenAI.Model != "gpt-from-file" || cfg.OpenAI.APIKeyEnv != "TEST_OPENAI_API_KEY" || cfg.OpenAI.APIKey != "file-secret" || cfg.OpenAI.BaseURL != "https://file.invalid/v1" || cfg.OpenAI.ReasoningEffort != "medium" || cfg.OpenAI.ReasoningSummary != "concise" {
 		t.Fatalf("unexpected OpenAI config: %#v", cfg.OpenAI)
 	}
 	if cfg.Database.Run.URL != "postgres://file.invalid/basetion" || cfg.Database.Dev.Mode != DatabaseModeTemporary || cfg.Database.Dev.TemporaryPrefix != "basetion_test" || cfg.Session.Dir != "/tmp/file-sessions" || cfg.Agent.MaxIterations != 7 || !cfg.Agent.UnsafeDebugData {
@@ -122,7 +124,7 @@ url = "postgres://defaults.invalid/basetion_dev"
 	if err != nil {
 		t.Fatalf("loadFile() error = %v", err)
 	}
-	if cfg.Session.Dir != defaultSessionDir || cfg.Agent.MaxIterations != defaultMaxIterations || cfg.Agent.UnsafeDebugData {
+	if cfg.Session.Dir != defaultSessionDir || cfg.Agent.MaxIterations != defaultMaxIterations || cfg.Agent.UnsafeDebugData || cfg.OpenAI.ReasoningEffort != "high" || cfg.OpenAI.ReasoningSummary != "detailed" {
 		t.Fatalf("defaults not applied: %#v", cfg)
 	}
 }

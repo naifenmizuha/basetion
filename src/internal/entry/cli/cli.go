@@ -10,8 +10,10 @@ import (
 	"io"
 	"strings"
 
+	"github.com/charmbracelet/glamour"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
+	"golang.org/x/term"
 )
 
 const usage = "用法: basetion [--profile run|dev] [--session-id <ID>] <提示词>"
@@ -100,9 +102,16 @@ func Render(w io.Writer, events *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.
 	if events == nil {
 		return errors.New("event stream is nil")
 	}
+	renderer, err := newReplyRenderer(w)
+	if err != nil {
+		return fmt.Errorf("创建 Markdown 渲染器: %w", err)
+	}
 	for {
 		event, ok := events.Next()
 		if !ok {
+			if err := renderer.flush(); err != nil {
+				return err
+			}
 			fmt.Fprintln(w, "\n[完成]")
 			return nil
 		}
@@ -113,6 +122,9 @@ func Render(w io.Writer, events *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.
 			return event.Err
 		}
 		if event.Action != nil {
+			if err := renderer.flush(); err != nil {
+				return err
+			}
 			renderAction(w, event.Action)
 		}
 		if event.Output == nil || event.Output.MessageOutput == nil {
@@ -122,13 +134,38 @@ func Render(w io.Writer, events *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.
 		if err != nil {
 			return fmt.Errorf("读取 Agent 输出: %w", err)
 		}
-		if err := renderMessage(w, message); err != nil {
+		if err := renderer.renderMessage(message); err != nil {
 			return err
 		}
 	}
 }
 
-func renderMessage(w io.Writer, message *schema.AgenticMessage) error {
+type replyRenderer struct {
+	w        io.Writer
+	markdown *glamour.TermRenderer
+	reply    strings.Builder
+}
+
+func newReplyRenderer(w io.Writer) (*replyRenderer, error) {
+	if !isTerminal(w) {
+		return &replyRenderer{w: w}, nil
+	}
+	markdown, err := glamour.NewTermRenderer(glamour.WithAutoStyle())
+	if err != nil {
+		return nil, err
+	}
+	return &replyRenderer{w: w, markdown: markdown}, nil
+}
+
+func isTerminal(w io.Writer) bool {
+	type fileDescriptor interface {
+		Fd() uintptr
+	}
+	file, ok := w.(fileDescriptor)
+	return ok && term.IsTerminal(int(file.Fd()))
+}
+
+func (r *replyRenderer) renderMessage(message *schema.AgenticMessage) error {
 	if message == nil {
 		return nil
 	}
@@ -138,12 +175,21 @@ func renderMessage(w io.Writer, message *schema.AgenticMessage) error {
 		}
 		switch {
 		case block.Reasoning != nil:
-			fmt.Fprintf(w, "[思考] %s\n", block.Reasoning.Text)
+			if err := r.flush(); err != nil {
+				return err
+			}
+			fmt.Fprintf(r.w, "[思考] %s\n", block.Reasoning.Text)
 		case block.AssistantGenText != nil:
-			fmt.Fprint(w, block.AssistantGenText.Text)
+			r.reply.WriteString(block.AssistantGenText.Text)
 		case block.FunctionToolCall != nil:
-			fmt.Fprintf(w, "\n[工具调用] %s call_id=%s 参数=%s\n", block.FunctionToolCall.Name, block.FunctionToolCall.CallID, block.FunctionToolCall.Arguments)
+			if err := r.flush(); err != nil {
+				return err
+			}
+			fmt.Fprintf(r.w, "\n[工具调用] %s call_id=%s 参数=%s\n", block.FunctionToolCall.Name, block.FunctionToolCall.CallID, block.FunctionToolCall.Arguments)
 		case block.FunctionToolResult != nil:
+			if err := r.flush(); err != nil {
+				return err
+			}
 			parts := make([]string, 0, len(block.FunctionToolResult.Content))
 			for _, content := range block.FunctionToolResult.Content {
 				if content == nil {
@@ -155,10 +201,36 @@ func renderMessage(w io.Writer, message *schema.AgenticMessage) error {
 					parts = append(parts, content.String())
 				}
 			}
-			fmt.Fprintf(w, "[工具结果] %s call_id=%s: %s\n", block.FunctionToolResult.Name, block.FunctionToolResult.CallID, strings.Join(parts, ""))
+			fmt.Fprintf(r.w, "[工具结果] %s call_id=%s: %s\n", block.FunctionToolResult.Name, block.FunctionToolResult.CallID, strings.Join(parts, ""))
 		default:
-			fmt.Fprintf(w, "[内容] %s\n", block.Type)
+			if err := r.flush(); err != nil {
+				return err
+			}
+			fmt.Fprintf(r.w, "[内容] %s\n", block.Type)
 		}
+	}
+	return nil
+}
+
+func (r *replyRenderer) flush() error {
+	if r.reply.Len() == 0 {
+		return nil
+	}
+	markdown := r.reply.String()
+	r.reply.Reset()
+	rendered := markdown
+	if r.markdown != nil {
+		var err error
+		rendered, err = r.markdown.Render(markdown)
+		if err != nil {
+			return fmt.Errorf("渲染回复 Markdown: %w", err)
+		}
+	}
+	if _, err := fmt.Fprintln(r.w, "[回复]"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprint(r.w, rendered); err != nil {
+		return err
 	}
 	return nil
 }

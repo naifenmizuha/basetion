@@ -10,10 +10,10 @@ Basetion 是一个以 Go 和 CloudWeGo Eino ADK 为核心的 Agent 应用骨架�
 2. `src/internal/application/conversation`：作为当前面向入口的应用用例门面，管理业务 Session、并发锁和一轮对话的事务边界。
 3. `src/internal/harness`：用 Eino `AgenticModel`、Skill Middleware、工具与 `TypedRunner` 编排 Agent 运行。
 4. `src/internal/tools`：把模型工具协议适配到领域服务，校验并转换工具输入输出。
-5. `src/internal/domain`：表达球员、球队、名单和 TeamOps 只读查询等领域能力，并定义领域服务、Repository 与事务端口。
+5. `src/internal/domain`：表达球员、球队、名单和球队只读查询等领域能力，并定义领域服务、Repository 与事务端口。
 6. `src/internal/infra`：实现本地 Session 文件、PostgreSQL 球队数据存储和受限 Lua 查询运行时。
 
-入口只调用会话应用服务；会话服务使用 Eino Runner，但不理解模型、Skill 或工具内部实现；Harness 按需加载仓库根目录 `skills/` 下的项目知识与 TeamOps 操作说明，并调用工具；工具只调用领域服务；基础设施实现应用层或领域层定义的接口。Skill 说明“怎么做”，TeamOps 工具和领域服务提供并约束“能做什么”。
+入口只调用会话应用服务；会话服务使用 Eino Runner，但不理解模型、Skill 或工具内部实现；Harness 按需加载仓库根目录 `skills/` 下的项目知识与球队管理说明，并调用工具；工具只调用领域服务；基础设施实现应用层或领域层定义的接口。Skill 说明“怎么做”，球队查询与修改工具及领域服务提供并约束“能做什么”。
 
 ## 运行 CLI
 
@@ -44,7 +44,7 @@ go run ./src/cmd/basetion --profile run --session-id demo "继续说明会话层
 
 CLI 会依次显示模型明确返回的可见思考摘要、工具调用、工具结果、最终回答和完成状态。默认 Callback 日志不记录提示词、私有推理或工具完整载荷；仅在 TOML 中设置 `agent.unsafe_debug_data=true` 才会输出调试载荷，请勿在生产环境开启。
 
-`skills/` 是必需的核心运行资源。启动时会校验 `project-knowledge` 和 `manage-teamops`；目录缺失、Skill 格式错误或必需 Skill 缺失都会导致启动失败。项目知识问题按需加载 `project-knowledge`，球队结构化数据任务先加载 `manage-teamops`，再通过只读 `teamops` 工具执行。
+`skills/` 是必需的核心运行资源。启动时会校验 `project-knowledge` 和 `manage-team`；目录缺失、Skill 格式错误或必需 Skill 缺失都会导致启动失败。项目知识问题按需加载 `project-knowledge`；球队结构化数据任务先加载 `manage-team`，再通过只读 `team_query` 或预定义写入 `team_modify` 工具执行。
 
 ## Session 与 Checkpoint
 

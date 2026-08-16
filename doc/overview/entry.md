@@ -9,7 +9,7 @@
 
 `src/cmd/basetion/main.go` 使用后台 Context 调用 `bootstrap.Execute`，传入命令行参数、标准输出和标准错误，并以返回值作为进程退出码。业务依赖不在 main 包中构造。
 
-仓库根目录的 `justfile` 通过 `app`、`dep` 与 `test` 三个 Just 模块分别组织应用、长期运行依赖和测试命令；模块源文件位于 `just/`。可使用 `just app run|dev`、`just dep up|down` 与 `just test all|player` 调用，模块命令会切换到仓库根目录后再执行；不再提供扁平兼容入口。`dep` 使用 Podman Compose 管理 PostgreSQL，镜像使用完整 Docker Hub 引用，数据卷带 `:Z` SELinux 标签；应用命令不会隐式启动或停止该依赖。
+仓库根目录的 `justfile` 通过 `app`、`dep` 与 `test` 三个 Just 模块分别组织应用、长期运行依赖和测试命令；模块源文件位于 `just/`。可使用 `just app run|dev`、`just dep up|down` 与 `just test all|player|player-add` 调用；`player-add` 使用开发 profile 演示经自动确认新增两名球员并加入名单。模块命令会切换到仓库根目录后再执行；应用命令不会隐式启动或停止依赖。
 
 ## CLI 协议
 
@@ -22,7 +22,7 @@ CLI 要求至少一个非空提示词参数，`--profile run|dev` 选择启动�
 `Render` 顺序消费事件且保留 `AgenticMessage.ContentBlocks` 的语义：
 
 - reasoning 摘要标记为 `[思考]`。
-- 助手文本直接输出。
+- 助手文本先按流式块累计；终端输出使用 Glamour 渲染 Markdown，非终端 writer 保留原始 Markdown，并统一加 `[回复]` 标记。
 - 工具调用与结果显示工具名、call ID 和对应内容。
 - 中断、退出、循环结束、Agent 转交等动作显示为 `[动作]`。
 - 事件流正常关闭后输出 `[完成]`；事件错误立即返回给 CLI。

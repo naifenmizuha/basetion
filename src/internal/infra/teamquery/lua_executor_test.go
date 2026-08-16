@@ -1,4 +1,4 @@
-package teamops
+package teamquery
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	domain "github.com/naifenmizuha/basetion/src/internal/domain/teamops"
+	domain "github.com/naifenmizuha/basetion/src/internal/domain/teamquery"
 )
 
 func testExecutor(t *testing.T) *LuaExecutor {
@@ -28,7 +28,7 @@ func TestLuaExecutorAggregatesAndConvertsResult(t *testing.T) {
 	t.Parallel()
 	executor := testExecutor(t)
 	result, err := execute(executor, context.Background(), `
-function main(teamops)
+function main(team)
     local values = {4, 1, 3, 2}
     table.sort(values)
     local sum = 0
@@ -40,8 +40,8 @@ function main(teamops)
         maximum = math.max(unpack(values)),
         label = string.upper("hits"),
         values = values,
-        empty_array = teamops.array(),
-        null_value = teamops.null,
+        empty_array = team.array(),
+        null_value = team.null,
     }
 end`)
 	if err != nil {
@@ -64,7 +64,7 @@ func TestLuaExecutorSandbox(t *testing.T) {
 	t.Parallel()
 	executor := testExecutor(t)
 	result, err := execute(executor, context.Background(), `
-function main(teamops)
+function main(team)
     return {
         os = type(os), io = type(io), require = type(require),
         load = type(load), loadfile = type(loadfile), debug = type(debug),
@@ -80,14 +80,14 @@ end`)
 			t.Fatalf("sandbox global %s has type %v", name, value)
 		}
 	}
-	if _, err := execute(executor, context.Background(), `function main(teamops) teamops.array = 1 end`); err == nil || !strings.Contains(err.Error(), "read-only") {
-		t.Fatalf("teamops mutation error = %v", err)
+	if _, err := execute(executor, context.Background(), `function main(team) team.array = 1 end`); err == nil || !strings.Contains(err.Error(), "read-only") {
+		t.Fatalf("team mutation error = %v", err)
 	}
-	if _, err := execute(executor, context.Background(), `function main(teamops) table.insert(teamops, 1) end`); err == nil || !strings.Contains(err.Error(), "table expected") {
-		t.Fatalf("teamops raw table mutation error = %v", err)
+	if _, err := execute(executor, context.Background(), `function main(team) table.insert(team, 1) end`); err == nil || !strings.Contains(err.Error(), "table expected") {
+		t.Fatalf("team raw table mutation error = %v", err)
 	}
-	if _, err := execute(executor, context.Background(), `function main(teamops) return teamops.array({}) end`); err == nil || !strings.Contains(err.Error(), "does not accept arguments") {
-		t.Fatalf("teamops.array argument error = %v", err)
+	if _, err := execute(executor, context.Background(), `function main(team) return team.array({}) end`); err == nil || !strings.Contains(err.Error(), "does not accept arguments") {
+		t.Fatalf("team.array argument error = %v", err)
 	}
 }
 
@@ -97,7 +97,7 @@ func TestLuaExecutorHonorsTimeout(t *testing.T) {
 	limits.Timeout = 20 * time.Millisecond
 	executor, _ := NewLuaExecutor(limits)
 	started := time.Now()
-	_, err := execute(executor, context.Background(), `function main(teamops) while true do end end`)
+	_, err := execute(executor, context.Background(), `function main(team) while true do end end`)
 	if err == nil || !strings.Contains(err.Error(), "canceled") {
 		t.Fatalf("timeout error = %v", err)
 	}

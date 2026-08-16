@@ -50,10 +50,12 @@ type DatabaseProfileConfig struct {
 }
 
 type OpenAIConfig struct {
-	Model     string `mapstructure:"model"`
-	APIKeyEnv string `mapstructure:"api_key_env"`
-	APIKey    string `mapstructure:"-"`
-	BaseURL   string `mapstructure:"base_url"`
+	Model            string `mapstructure:"model"`
+	APIKeyEnv        string `mapstructure:"api_key_env"`
+	APIKey           string `mapstructure:"-"`
+	BaseURL          string `mapstructure:"base_url"`
+	ReasoningEffort  string `mapstructure:"reasoning_effort"`
+	ReasoningSummary string `mapstructure:"reasoning_summary"`
 }
 
 type SessionConfig struct {
@@ -158,6 +160,8 @@ func decodeConfigFile(path string) (Config, error) {
 	v := viper.New()
 	v.SetConfigFile(path)
 	v.SetConfigType("toml")
+	v.SetDefault("openai.reasoning_effort", "high")
+	v.SetDefault("openai.reasoning_summary", "detailed")
 	v.SetDefault("session.dir", defaultSessionDir)
 	v.SetDefault("agent.max_iterations", defaultMaxIterations)
 	v.SetDefault("agent.unsafe_debug_data", false)
@@ -171,6 +175,8 @@ func decodeConfigFile(path string) (Config, error) {
 	cfg.OpenAI.Model = strings.TrimSpace(cfg.OpenAI.Model)
 	cfg.OpenAI.APIKeyEnv = strings.TrimSpace(cfg.OpenAI.APIKeyEnv)
 	cfg.OpenAI.BaseURL = strings.TrimSpace(cfg.OpenAI.BaseURL)
+	cfg.OpenAI.ReasoningEffort = strings.TrimSpace(cfg.OpenAI.ReasoningEffort)
+	cfg.OpenAI.ReasoningSummary = strings.TrimSpace(cfg.OpenAI.ReasoningSummary)
 	cfg.Session.Dir = strings.TrimSpace(cfg.Session.Dir)
 	cfg.Database.Run.trim()
 	cfg.Database.Dev.trim()
@@ -209,6 +215,12 @@ func (c Config) Validate() error {
 		if c.OpenAI.APIKeyEnv != "" {
 			problems = append(problems, fmt.Errorf("environment variable %q referenced by openai.api_key_env is required", c.OpenAI.APIKeyEnv))
 		}
+	}
+	if c.OpenAI.ReasoningEffort == "" {
+		problems = append(problems, errors.New("openai.reasoning_effort must not be empty"))
+	}
+	if c.OpenAI.ReasoningSummary == "" {
+		problems = append(problems, errors.New("openai.reasoning_summary must not be empty"))
 	}
 	if err := c.Database.Validate(); err != nil {
 		problems = append(problems, err)
@@ -276,6 +288,8 @@ func (c Config) DiagnosticFields() map[string]any {
 	return map[string]any{
 		"model":             c.OpenAI.Model,
 		"base_url_set":      c.OpenAI.BaseURL != "",
+		"reasoning_effort":  c.OpenAI.ReasoningEffort,
+		"reasoning_summary": c.OpenAI.ReasoningSummary,
 		"database_run_mode": c.Database.Run.Mode,
 		"database_dev_mode": c.Database.Dev.Mode,
 		"session_dir":       c.Session.Dir,

@@ -42,7 +42,7 @@ func NewRuntime(
 	cfg := appconfig.Get()
 	agent, err := adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{
 		Name:          "basetion",
-		Description:   "按需加载项目知识并使用 TeamOps 只读能力的 Basetion 助手",
+		Description:   "按需加载项目知识并使用球队查询与修改能力的 Basetion 助手",
 		Instruction:   defaultInstruction,
 		Model:         agenticModel,
 		MaxIterations: cfg.Agent.MaxIterations,

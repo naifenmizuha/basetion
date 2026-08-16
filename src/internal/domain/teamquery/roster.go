@@ -1,4 +1,4 @@
-package teamops
+package teamquery
 
 import (
 	"context"

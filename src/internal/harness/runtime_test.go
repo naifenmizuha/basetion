@@ -17,8 +17,8 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	appconfig "github.com/naifenmizuha/basetion/src/internal/config"
-	domainteamops "github.com/naifenmizuha/basetion/src/internal/domain/teamops"
-	infrateamops "github.com/naifenmizuha/basetion/src/internal/infra/teamops"
+	domainteamquery "github.com/naifenmizuha/basetion/src/internal/domain/teamquery"
+	infrateamquery "github.com/naifenmizuha/basetion/src/internal/infra/teamquery"
 	basetiontools "github.com/naifenmizuha/basetion/src/internal/tools"
 )
 
@@ -194,18 +194,18 @@ func TestRuntimeLoadsProjectKnowledgeSkill(t *testing.T) {
 	}
 }
 
-func TestRuntimeUsesTeamOpsTool(t *testing.T) {
+func TestRuntimeUsesTeamQueryTool(t *testing.T) {
 	t.Parallel()
 
-	executor, err := infrateamops.NewLuaExecutor(infrateamops.DefaultLimits())
+	executor, err := infrateamquery.NewLuaExecutor(infrateamquery.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := domainteamops.NewService(executor)
+	service, err := domainteamquery.NewService(executor)
 	if err != nil {
 		t.Fatal(err)
 	}
-	teamOpsTool, err := basetiontools.NewTeamOps(service)
+	teamQueryTool, err := basetiontools.NewTeamQuery(service)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,16 +213,16 @@ func TestRuntimeUsesTeamOpsTool(t *testing.T) {
 		{assistantMessage(schema.NewContentBlockChunk(&schema.FunctionToolCall{
 			CallID:    "skill-call",
 			Name:      "skill",
-			Arguments: `{"skill":"manage-teamops"}`,
+			Arguments: `{"skill":"manage-team"}`,
 		}, &schema.StreamingMeta{Index: 0}))},
 		{assistantMessage(schema.NewContentBlockChunk(&schema.FunctionToolCall{
-			CallID:    "teamops-call",
-			Name:      basetiontools.TeamOpsToolName,
-			Arguments: `{"mode":"query","program":"function main() return {total = 6 + 7} end"}`,
+			CallID:    "team-query-call",
+			Name:      basetiontools.TeamQueryToolName,
+			Arguments: `{"mode":"query","program":"function main(team) return {total = 6 + 7} end"}`,
 		}, &schema.StreamingMeta{Index: 0}))},
 		{assistantMessage(schema.NewContentBlockChunk(&schema.AssistantGenText{Text: "结果是 13。"}, &schema.StreamingMeta{Index: 0}))},
 	}}
-	runtime, err := NewRuntime(context.Background(), model, []tool.BaseTool{teamOpsTool}, log.New(io.Discard, "", 0))
+	runtime, err := NewRuntime(context.Background(), model, []tool.BaseTool{teamQueryTool}, log.New(io.Discard, "", 0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,17 +230,17 @@ func TestRuntimeUsesTeamOpsTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var sawSkillResult, sawTeamOpsResult bool
+	var sawSkillResult, sawTeamQueryResult bool
 	for _, message := range messages {
 		for _, block := range message.ContentBlocks {
 			if result := block.FunctionToolResult; result != nil {
-				sawSkillResult = sawSkillResult || result.Name == "skill" && result.CallID == "skill-call" && strings.Contains(result.Content[0].String(), "先调用 `teamops` 的 `describe`")
-				sawTeamOpsResult = sawTeamOpsResult || result.Name == basetiontools.TeamOpsToolName && result.CallID == "teamops-call" && strings.Contains(result.Content[0].String(), `"total":13`)
+				sawSkillResult = sawSkillResult || result.Name == "skill" && result.CallID == "skill-call" && strings.Contains(result.Content[0].String(), "先调用 `team_query` 的 `describe`")
+				sawTeamQueryResult = sawTeamQueryResult || result.Name == basetiontools.TeamQueryToolName && result.CallID == "team-query-call" && strings.Contains(result.Content[0].String(), `"total":13`)
 			}
 		}
 	}
-	if !sawSkillResult || !sawTeamOpsResult {
-		t.Fatalf("expected Skill and TeamOps results, skill=%v teamops=%v messages=%#v", sawSkillResult, sawTeamOpsResult, messages)
+	if !sawSkillResult || !sawTeamQueryResult {
+		t.Fatalf("expected Skill and team query results, skill=%v query=%v messages=%#v", sawSkillResult, sawTeamQueryResult, messages)
 	}
 }
 

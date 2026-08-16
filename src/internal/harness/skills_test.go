@@ -23,7 +23,7 @@ func writeTestSkill(t *testing.T, root, directory, name, description, body strin
 func TestSkillBackendDiscoversRequiredSkillsAndRejectsUnknown(t *testing.T) {
 	root := t.TempDir()
 	writeTestSkill(t, root, "project", "project-knowledge", "project facts", "project body")
-	writeTestSkill(t, root, "teamops", "manage-teamops", "team operations", "teamops body")
+	writeTestSkill(t, root, "team", "manage-team", "team operations", "team body")
 
 	backend, err := newSkillBackend(context.Background(), root, requiredSkillNames)
 	if err != nil {
@@ -76,7 +76,7 @@ func TestSkillBackendFailsWhenRequiredSkillIsMissing(t *testing.T) {
 	root := t.TempDir()
 	writeTestSkill(t, root, "project", "project-knowledge", "project facts", "project body")
 	_, err := newSkillBackend(context.Background(), root, requiredSkillNames)
-	if err == nil || !strings.Contains(err.Error(), `required Skill "manage-teamops" is missing`) {
+	if err == nil || !strings.Contains(err.Error(), `required Skill "manage-team" is missing`) {
 		t.Fatalf("error = %v, want missing required Skill error", err)
 	}
 }
@@ -95,13 +95,13 @@ func TestRepositorySkillsContainRequiredGuidance(t *testing.T) {
 			t.Errorf("project Skill missing %q", phrase)
 		}
 	}
-	teamops, err := backend.Get(context.Background(), "manage-teamops")
+	teamSkill, err := backend.Get(context.Background(), "manage-team")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, phrase := range []string{"describe", "available", "只读", "不得生成模拟数据", "尚未接入"} {
-		if !strings.Contains(teamops.Content, phrase) {
-			t.Errorf("TeamOps Skill missing %q", phrase)
+	for _, phrase := range []string{"team_query", "team_modify", "confirmed=true", "不得猜测", "幂等"} {
+		if !strings.Contains(teamSkill.Content, phrase) {
+			t.Errorf("team Skill missing %q", phrase)
 		}
 	}
 }

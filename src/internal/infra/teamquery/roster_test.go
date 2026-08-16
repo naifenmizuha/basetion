@@ -1,11 +1,11 @@
-package teamops
+package teamquery
 
 import (
 	"context"
 	"testing"
 
 	"github.com/naifenmizuha/basetion/src/internal/domain/player"
-	domain "github.com/naifenmizuha/basetion/src/internal/domain/teamops"
+	domain "github.com/naifenmizuha/basetion/src/internal/domain/teamquery"
 )
 
 type stubRosterReader struct{ filter domain.RosterPlayerFilter }
@@ -34,7 +34,7 @@ func TestLuaRosterModule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := executor.Execute(context.Background(), domain.Query{Modules: []string{"roster"}, Program: `function main(teamops) return teamops.roster.players({team_id="team-1",on_date="2026-08-15",position_any={"pitcher"}}) end`})
+	result, err := executor.Execute(context.Background(), domain.Query{Modules: []string{"roster"}, Program: `function main(team) return team.roster.players({team_id="team-1",on_date="2026-08-15",position_any={"pitcher"}}) end`})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestLuaRosterModule(t *testing.T) {
 func TestLuaRosterPreservesEmptyArrays(t *testing.T) {
 	t.Parallel()
 	executor, _ := NewLuaExecutor(DefaultLimits(), WithRosterReader(&emptyRosterReader{}))
-	result, err := executor.Execute(context.Background(), domain.Query{Modules: []string{"roster"}, Program: `function main(teamops) return teamops.roster.teams({active=true}) end`})
+	result, err := executor.Execute(context.Background(), domain.Query{Modules: []string{"roster"}, Program: `function main(team) return team.roster.teams({active=true}) end`})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestLuaRosterPreservesEmptyArrays(t *testing.T) {
 func TestLuaRosterRequiresTeamScope(t *testing.T) {
 	t.Parallel()
 	executor, _ := NewLuaExecutor(DefaultLimits(), WithRosterReader(&stubRosterReader{}))
-	_, err := executor.Execute(context.Background(), domain.Query{Modules: []string{"roster"}, Program: `function main(teamops) return teamops.roster.players({}) end`})
+	_, err := executor.Execute(context.Background(), domain.Query{Modules: []string{"roster"}, Program: `function main(team) return team.roster.players({}) end`})
 	if err == nil {
 		t.Fatal("missing team id accepted")
 	}

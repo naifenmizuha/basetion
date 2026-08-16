@@ -8,21 +8,21 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/naifenmizuha/basetion/src/internal/domain/player"
 	"github.com/naifenmizuha/basetion/src/internal/domain/roster"
-	"github.com/naifenmizuha/basetion/src/internal/domain/teamops"
+	"github.com/naifenmizuha/basetion/src/internal/domain/teamquery"
 )
 
 type RosterReader struct{ db dbtx }
 
 func (s *Store) RosterReader() *RosterReader { return &RosterReader{db: s.pool} }
 
-func (r *RosterReader) ListTeams(ctx context.Context, activeOnly bool) ([]teamops.TeamView, error) {
+func (r *RosterReader) ListTeams(ctx context.Context, activeOnly bool) ([]teamquery.TeamView, error) {
 	rows, err := r.db.Query(ctx, `SELECT id::text,name,active FROM teams WHERE NOT $1 OR active ORDER BY name,id`, activeOnly)
 	if err != nil {
 		return nil, fmt.Errorf("list teams: %w", err)
 	}
 	defer rows.Close()
-	result, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (teamops.TeamView, error) {
-		var value teamops.TeamView
+	result, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (teamquery.TeamView, error) {
+		var value teamquery.TeamView
 		err := row.Scan(&value.ID, &value.Name, &value.Active)
 		return value, err
 	})
@@ -32,7 +32,7 @@ func (r *RosterReader) ListTeams(ctx context.Context, activeOnly bool) ([]teamop
 	return result, nil
 }
 
-func (r *RosterReader) ListPlayers(ctx context.Context, filter teamops.RosterPlayerFilter) ([]teamops.RosterPlayerView, error) {
+func (r *RosterReader) ListPlayers(ctx context.Context, filter teamquery.RosterPlayerFilter) ([]teamquery.RosterPlayerView, error) {
 	if filter.TeamID == "" {
 		return nil, fmt.Errorf("team id is required")
 	}
@@ -57,8 +57,8 @@ ORDER BY m.jersey_number,p.name,p.id`, filter.TeamID, onDate, int16(filter.Posit
 		return nil, fmt.Errorf("list roster players: %w", err)
 	}
 	defer rows.Close()
-	result, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (teamops.RosterPlayerView, error) {
-		var value teamops.RosterPlayerView
+	result, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (teamquery.RosterPlayerView, error) {
+		var value teamquery.RosterPlayerView
 		var batting, throwing, positions uint8
 		var joined time.Time
 		var left *time.Time
