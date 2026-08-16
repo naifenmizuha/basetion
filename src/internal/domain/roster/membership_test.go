@@ -57,3 +57,18 @@ func TestMembershipRejectsInvalidAndCorruptedData(t *testing.T) {
 		t.Fatal("future leave accepted")
 	}
 }
+
+func TestMembershipSoftDeleteKeepsPeriod(t *testing.T) {
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	joined := mustDate(t, "2026-08-01")
+	value, err := New("membership", "team", "player", 10, joined, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := value.Delete(now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if !value.Deleted() || !value.Current() {
+		t.Fatalf("deleted=%v current=%v", value.Deleted(), value.Current())
+	}
+}

@@ -8,3 +8,6 @@ player:
 
 player-add:
     cd {{justfile_directory()}} && GOTOOLCHAIN=auto go run ./src/cmd/basetion --profile dev "2026年8月16日，季汉队来了两个新队员，95号关兴是二垒手游击手，打击左右开弓，右手投球；96号张苞是投手和一垒手，左打右投。自动确认。"
+
+game:
+    cd {{justfile_directory()}} && GOTOOLCHAIN=auto go run ./src/cmd/basetion --profile dev "最近蜀汉队和曹魏队的比赛结果咋样，有啥亮眼表现吗？"

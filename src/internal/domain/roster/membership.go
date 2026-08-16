@@ -67,6 +67,7 @@ type Membership struct {
 	version      uint64
 	createdAt    time.Time
 	updatedAt    time.Time
+	deletedAt    *time.Time
 }
 
 func New(id ID, teamID team.ID, playerID player.ID, jersey int, joinedAt Date, now time.Time) (Membership, error) {
@@ -74,7 +75,11 @@ func New(id ID, teamID team.ID, playerID player.ID, jersey int, joinedAt Date, n
 }
 
 func Restore(id ID, teamID team.ID, playerID player.ID, jersey int, joinedAt Date, leftAt *Date, version uint64, createdAt, updatedAt time.Time) (Membership, error) {
-	membership, err := restore(id, teamID, playerID, jersey, joinedAt, leftAt, version, createdAt, updatedAt)
+	return RestoreDeleted(id, teamID, playerID, jersey, joinedAt, leftAt, version, createdAt, updatedAt, nil)
+}
+
+func RestoreDeleted(id ID, teamID team.ID, playerID player.ID, jersey int, joinedAt Date, leftAt *Date, version uint64, createdAt, updatedAt time.Time, deletedAt *time.Time) (Membership, error) {
+	membership, err := restoreDeleted(id, teamID, playerID, jersey, joinedAt, leftAt, version, createdAt, updatedAt, deletedAt)
 	if err != nil {
 		return Membership{}, fmt.Errorf("%w: %v", ErrCorruptedData, err)
 	}
@@ -82,6 +87,10 @@ func Restore(id ID, teamID team.ID, playerID player.ID, jersey int, joinedAt Dat
 }
 
 func restore(id ID, teamID team.ID, playerID player.ID, jersey int, joinedAt Date, leftAt *Date, version uint64, createdAt, updatedAt time.Time) (Membership, error) {
+	return restoreDeleted(id, teamID, playerID, jersey, joinedAt, leftAt, version, createdAt, updatedAt, nil)
+}
+
+func restoreDeleted(id ID, teamID team.ID, playerID player.ID, jersey int, joinedAt Date, leftAt *Date, version uint64, createdAt, updatedAt time.Time, deletedAt *time.Time) (Membership, error) {
 	switch {
 	case id == "":
 		return Membership{}, errors.New("membership id is required")
@@ -101,8 +110,10 @@ func restore(id ID, teamID team.ID, playerID player.ID, jersey int, joinedAt Dat
 		return Membership{}, errors.New("membership timestamps are required")
 	case updatedAt.Before(createdAt):
 		return Membership{}, errors.New("membership updated time precedes creation")
+	case deletedAt != nil && deletedAt.Before(createdAt):
+		return Membership{}, errors.New("membership deleted time precedes creation")
 	}
-	return Membership{id: id, teamID: teamID, playerID: playerID, jerseyNumber: uint8(jersey), joinedAt: joinedAt, leftAt: leftAt, version: version, createdAt: createdAt, updatedAt: updatedAt}, nil
+	return Membership{id: id, teamID: teamID, playerID: playerID, jerseyNumber: uint8(jersey), joinedAt: joinedAt, leftAt: leftAt, version: version, createdAt: createdAt, updatedAt: updatedAt, deletedAt: cloneTime(deletedAt)}, nil
 }
 
 func (m Membership) ID() ID              { return m.id }
@@ -117,15 +128,20 @@ func (m Membership) LeftAt() *Date {
 	value := *m.leftAt
 	return &value
 }
-func (m Membership) Version() uint64      { return m.version }
-func (m Membership) CreatedAt() time.Time { return m.createdAt }
-func (m Membership) UpdatedAt() time.Time { return m.updatedAt }
-func (m Membership) Current() bool        { return m.leftAt == nil }
+func (m Membership) Version() uint64       { return m.version }
+func (m Membership) CreatedAt() time.Time  { return m.createdAt }
+func (m Membership) UpdatedAt() time.Time  { return m.updatedAt }
+func (m Membership) DeletedAt() *time.Time { return cloneTime(m.deletedAt) }
+func (m Membership) Deleted() bool         { return m.deletedAt != nil }
+func (m Membership) Current() bool         { return m.leftAt == nil }
 func (m Membership) ActiveOn(date Date) bool {
 	return !date.Before(m.joinedAt) && (m.leftAt == nil || date.Before(*m.leftAt))
 }
 
 func (m *Membership) ChangeJersey(jersey int, now time.Time) error {
+	if m.Deleted() {
+		return ErrNotFound
+	}
 	if jersey < 0 || jersey > 99 {
 		return errors.New("jersey number must be between 0 and 99")
 	}
@@ -137,6 +153,9 @@ func (m *Membership) ChangeJersey(jersey int, now time.Time) error {
 }
 
 func (m *Membership) Leave(leftAt Date, today Date, now time.Time) error {
+	if m.Deleted() {
+		return ErrNotFound
+	}
 	if !m.Current() {
 		return errors.New("membership already ended")
 	}
@@ -148,4 +167,23 @@ func (m *Membership) Leave(leftAt Date, today Date, now time.Time) error {
 	}
 	m.leftAt, m.updatedAt, m.version = &leftAt, now, m.version+1
 	return nil
+}
+
+func (m *Membership) Delete(now time.Time) error {
+	if m.Deleted() {
+		return ErrNotFound
+	}
+	if now.Before(m.createdAt) {
+		return errors.New("membership deleted time precedes creation")
+	}
+	m.deletedAt, m.updatedAt, m.version = cloneTime(&now), now, m.version+1
+	return nil
+}
+
+func cloneTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }

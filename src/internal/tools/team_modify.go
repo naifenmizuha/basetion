@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/eino/components/tool"
 	toolutils "github.com/cloudwego/eino/components/tool/utils"
 	"github.com/google/uuid"
+	"github.com/naifenmizuha/basetion/src/internal/domain/game"
 	"github.com/naifenmizuha/basetion/src/internal/domain/player"
 	"github.com/naifenmizuha/basetion/src/internal/domain/roster"
 	"github.com/naifenmizuha/basetion/src/internal/domain/team"
@@ -33,6 +35,18 @@ type RosterModifier interface {
 	Assign(context.Context, roster.ID, team.ID, player.ID, int, roster.Date) (roster.Membership, error)
 	ChangeJersey(context.Context, team.ID, roster.ID, int) (roster.Membership, error)
 	Leave(context.Context, team.ID, roster.ID, roster.Date) (roster.Membership, error)
+}
+type GameModifier interface {
+	CreateMatchWith(context.Context, game.MatchID, team.ID, team.ID, time.Time, string, game.MatchStatus) (game.Match, error)
+	UpdateMatch(context.Context, game.MatchID, team.ID, team.ID, time.Time, string) (game.Match, error)
+	SetMatchStatus(context.Context, game.MatchID, game.MatchStatus) (game.Match, error)
+	DeleteMatch(context.Context, game.MatchID) error
+	CreateLineupWith(context.Context, game.MatchID, team.ID, game.LineupKind, int, string, []game.LineupEntry) (game.Lineup, error)
+	ReplaceLineupWith(context.Context, game.MatchID, team.ID, game.LineupKind, int, string, []game.LineupEntry) (game.Lineup, error)
+	DeleteLineup(context.Context, game.MatchID, team.ID, game.LineupKind, uint16) error
+	CreatePlateWith(context.Context, game.PlateID, game.MatchID, int, int, game.Half, int, player.ID, player.ID, string, game.PlateType, string, [3]*player.ID, int, int) (game.Plate, error)
+	UpdatePlate(context.Context, game.PlateID, int, int, game.Half, int, player.ID, player.ID, string, game.PlateType, string, [3]*player.ID, int, int) (game.Plate, error)
+	DeletePlate(context.Context, game.PlateID) error
 }
 
 type IDGenerator func() string
@@ -124,12 +138,13 @@ type teamModifyHandler struct {
 	teams      TeamModifier
 	players    PlayerModifier
 	rosters    RosterModifier
+	games      GameModifier
 	newID      IDGenerator
 	operations map[string]modifyOperation
 }
 
-func NewTeamModify(teams TeamModifier, players PlayerModifier, rosters RosterModifier, options ...TeamModifyOption) (tool.InvokableTool, error) {
-	if teams == nil || players == nil || rosters == nil {
+func NewTeamModify(teams TeamModifier, players PlayerModifier, rosters RosterModifier, games GameModifier, options ...TeamModifyOption) (tool.InvokableTool, error) {
+	if teams == nil || players == nil || rosters == nil || games == nil {
 		return nil, errors.New("team modify services are required")
 	}
 	settings := teamModifyOptions{newID: uuid.NewString}
@@ -139,7 +154,7 @@ func NewTeamModify(teams TeamModifier, players PlayerModifier, rosters RosterMod
 	if settings.newID == nil {
 		return nil, errors.New("team modify id generator is required")
 	}
-	handler := &teamModifyHandler{teams: teams, players: players, rosters: rosters, newID: settings.newID, operations: defaultModifyOperations()}
+	handler := &teamModifyHandler{teams: teams, players: players, rosters: rosters, games: games, newID: settings.newID, operations: defaultModifyOperations()}
 	return toolutils.InferTool(
 		TeamModifyToolName,
 		"发现并执行预定义的球队数据修改操作。先用 describe 一次加载所需操作及参数；获得用户对完整修改的明确确认后，才能用 execute 执行。多个修改通过 operations 一次提交，按数组顺序执行，遇错中止且不回滚，并返回失败位置、原因和未执行步骤。该工具不接受脚本或数据库语句。",
@@ -236,7 +251,7 @@ func (h *teamModifyHandler) executeBatch(ctx context.Context, requests []teamMod
 
 func (h *teamModifyHandler) describe(requested []string) []modifyTopicDescription {
 	if len(requested) == 0 {
-		groups := []string{"team", "player", "roster"}
+		groups := []string{"team", "player", "roster", "match", "lineup", "plate"}
 		result := make([]modifyTopicDescription, 0, len(groups))
 		for _, group := range groups {
 			result = append(result, h.describeGroup(group))
@@ -251,7 +266,7 @@ func (h *teamModifyHandler) describe(requested []string) []modifyTopicDescriptio
 			continue
 		}
 		seen[name] = struct{}{}
-		if name == "team" || name == "player" || name == "roster" {
+		if name == "team" || name == "player" || name == "roster" || name == "match" || name == "lineup" || name == "plate" {
 			result = append(result, h.describeGroup(name))
 			continue
 		}
@@ -280,7 +295,7 @@ func (h *teamModifyHandler) describeGroup(group string) modifyTopicDescription {
 	return modifyTopicDescription{Name: group, Kind: "group", Found: true, Summary: group + " 数据修改操作。", Children: children}
 }
 
-var modifyOperationOrder = []string{"team.create", "player.create", "player.update", "player.set_active", "roster.assign", "roster.change_jersey", "roster.leave"}
+var modifyOperationOrder = []string{"team.create", "player.create", "player.update", "player.set_active", "roster.assign", "roster.change_jersey", "roster.leave", "match.create", "match.update", "match.set_status", "match.delete", "lineup.create", "lineup.replace", "lineup.delete", "plate.create", "plate.update", "plate.delete"}
 
 func defaultModifyOperations() map[string]modifyOperation {
 	hands := []string{"left", "right"}
@@ -299,6 +314,16 @@ func defaultModifyOperations() map[string]modifyOperation {
 		"roster.assign":        {name: "roster.assign", group: "roster", summary: "将球员加入球队名单。", parameters: []modifyFieldDescription{{Name: "team_id", Type: "string", Required: true, Description: "球队 ID。"}, {Name: "player_id", Type: "string", Required: true, Description: "球员 ID。"}, {Name: "jersey_number", Type: "integer", Required: true, Description: "0 到 99 的球衣号码。"}, {Name: "joined_at", Type: "string", Required: true, Description: "加入日期，格式 YYYY-MM-DD。"}}, resultType: "membership"},
 		"roster.change_jersey": {name: "roster.change_jersey", group: "roster", summary: "修改当前名单成员的球衣号码。", parameters: []modifyFieldDescription{{Name: "team_id", Type: "string", Required: true, Description: "球队 ID。"}, {Name: "membership_id", Type: "string", Required: true, Description: "名单记录 ID。"}, {Name: "jersey_number", Type: "integer", Required: true, Description: "0 到 99 的新球衣号码。"}}, resultType: "membership"},
 		"roster.leave":         {name: "roster.leave", group: "roster", summary: "结束球员的当前效力关系。", parameters: []modifyFieldDescription{{Name: "team_id", Type: "string", Required: true, Description: "球队 ID。"}, {Name: "membership_id", Type: "string", Required: true, Description: "名单记录 ID。"}, {Name: "left_at", Type: "string", Required: true, Description: "离队日期，格式 YYYY-MM-DD。"}}, resultType: "membership"},
+		"match.create":         {name: "match.create", group: "match", summary: "创建比赛。", parameters: matchCreateFields(), resultType: "match"},
+		"match.update":         {name: "match.update", group: "match", summary: "更新比赛安排。", parameters: append([]modifyFieldDescription{{Name: "match_id", Type: "string", Required: true, Description: "比赛 ID。"}}, matchBaseFields()...), resultType: "match"},
+		"match.set_status":     {name: "match.set_status", group: "match", summary: "设置比赛状态。", parameters: []modifyFieldDescription{{Name: "match_id", Type: "string", Required: true, Description: "比赛 ID。"}, {Name: "status", Type: "string", Required: true, Description: "比赛状态。", Values: []string{"scheduled", "in_progress", "final", "cancelled"}}}, resultType: "match"},
+		"match.delete":         {name: "match.delete", group: "match", summary: "软删除比赛及关联阵容和打席。", parameters: []modifyFieldDescription{{Name: "match_id", Type: "string", Required: true, Description: "比赛 ID。"}}, resultType: "deleted"},
+		"lineup.create":        {name: "lineup.create", group: "lineup", summary: "创建比赛阵容。", parameters: lineupFields(), resultType: "lineup"},
+		"lineup.replace":       {name: "lineup.replace", group: "lineup", summary: "替换比赛阵容。", parameters: lineupFields(), resultType: "lineup"},
+		"lineup.delete":        {name: "lineup.delete", group: "lineup", summary: "软删除比赛阵容。", parameters: lineupKeyFields(), resultType: "deleted"},
+		"plate.create":         {name: "plate.create", group: "plate", summary: "创建打席及赛后比分快照。", parameters: plateFields(true), resultType: "plate"},
+		"plate.update":         {name: "plate.update", group: "plate", summary: "更新打席及赛后比分快照。", parameters: plateFields(false), resultType: "plate"},
+		"plate.delete":         {name: "plate.delete", group: "plate", summary: "软删除打席。", parameters: []modifyFieldDescription{{Name: "plate_id", Type: "string", Required: true, Description: "打席 ID。"}}, resultType: "deleted"},
 	}
 }
 
@@ -434,7 +459,7 @@ func (h *teamModifyHandler) execute(ctx context.Context, operation string, argum
 		}
 		return membershipResult(value), nil
 	default:
-		return nil, fmt.Errorf("unknown team modify operation %q", operation)
+		return h.executeGame(ctx, operation, arguments)
 	}
 }
 
@@ -512,7 +537,7 @@ func validateModifyArguments(operation string, arguments map[string]any) error {
 		}
 		return nil
 	default:
-		return fmt.Errorf("unknown team modify operation %q", operation)
+		return validateGameArguments(operation, arguments)
 	}
 }
 

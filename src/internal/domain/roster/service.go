@@ -11,10 +11,12 @@ import (
 
 type TeamRepository interface {
 	GetForUpdate(context.Context, team.ID) (team.Team, error)
+	Update(context.Context, team.Team, uint64) error
 }
 
 type PlayerRepository interface {
 	GetForUpdate(context.Context, player.ID) (player.Player, error)
+	Update(context.Context, player.Player, uint64) error
 }
 
 type MembershipRepository interface {
@@ -25,6 +27,8 @@ type MembershipRepository interface {
 	CurrentByTeamAndPlayer(context.Context, team.ID, player.ID) (*Membership, error)
 	JerseyOccupied(context.Context, team.ID, int, *ID) (bool, error)
 	Overlaps(context.Context, team.ID, player.ID, Date, *Date, *ID) (bool, error)
+	SoftDeleteByTeam(context.Context, team.ID, time.Time) error
+	SoftDeleteByPlayer(context.Context, player.ID, time.Time) error
 }
 
 type Repositories struct {
@@ -154,6 +158,60 @@ func (s *Service) Leave(ctx context.Context, teamID team.ID, id ID, leftAt Date)
 		return nil
 	})
 	return ended, err
+}
+
+func (s *Service) DeleteMembership(ctx context.Context, teamID team.ID, id ID) error {
+	return s.uow.WithinTransaction(ctx, func(repos Repositories) error {
+		if _, err := repos.Teams.GetForUpdate(ctx, teamID); err != nil {
+			return err
+		}
+		membership, err := repos.Memberships.GetForUpdate(ctx, id)
+		if err != nil {
+			return err
+		}
+		if membership.TeamID() != teamID {
+			return ErrNotFound
+		}
+		expected := membership.Version()
+		if err := membership.Delete(s.clock.Now()); err != nil {
+			return err
+		}
+		return repos.Memberships.Update(ctx, membership, expected)
+	})
+}
+
+func (s *Service) DeleteTeam(ctx context.Context, id team.ID) error {
+	return s.uow.WithinTransaction(ctx, func(repos Repositories) error {
+		value, err := repos.Teams.GetForUpdate(ctx, id)
+		if err != nil {
+			return err
+		}
+		now, expected := s.clock.Now(), value.Version()
+		if err := repos.Memberships.SoftDeleteByTeam(ctx, id, now); err != nil {
+			return err
+		}
+		if err := value.Delete(now); err != nil {
+			return err
+		}
+		return repos.Teams.Update(ctx, value, expected)
+	})
+}
+
+func (s *Service) DeletePlayer(ctx context.Context, id player.ID) error {
+	return s.uow.WithinTransaction(ctx, func(repos Repositories) error {
+		value, err := repos.Players.GetForUpdate(ctx, id)
+		if err != nil {
+			return err
+		}
+		now, expected := s.clock.Now(), value.Version()
+		if err := repos.Memberships.SoftDeleteByPlayer(ctx, id, now); err != nil {
+			return err
+		}
+		if err := value.Delete(now); err != nil {
+			return err
+		}
+		return repos.Players.Update(ctx, value, expected)
+	})
 }
 
 func validateParticipants(ctx context.Context, repos Repositories, teamID team.ID, playerID player.ID) error {

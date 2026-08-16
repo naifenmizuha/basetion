@@ -51,3 +51,23 @@ func TestPlayerMutationAdvancesVersion(t *testing.T) {
 		t.Fatalf("unexpected activation: %#v", value)
 	}
 }
+
+func TestPlayerSoftDeleteIsDistinctFromInactive(t *testing.T) {
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	value, err := New("player", "Player", HandLeft, HandRight, PositionPitcher, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := value.SetActive(false, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if value.Deleted() {
+		t.Fatal("inactive player was deleted")
+	}
+	if err := value.Delete(now.Add(2 * time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if !value.Deleted() || value.Active() {
+		t.Fatalf("deleted=%v active=%v", value.Deleted(), value.Active())
+	}
+}

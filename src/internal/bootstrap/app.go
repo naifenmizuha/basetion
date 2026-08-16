@@ -11,6 +11,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/naifenmizuha/basetion/src/internal/application/conversation"
 	"github.com/naifenmizuha/basetion/src/internal/config"
+	"github.com/naifenmizuha/basetion/src/internal/domain/game"
 	"github.com/naifenmizuha/basetion/src/internal/domain/player"
 	"github.com/naifenmizuha/basetion/src/internal/domain/roster"
 	"github.com/naifenmizuha/basetion/src/internal/domain/team"
@@ -80,7 +81,22 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 			}
 		}
 	}()
-	teamQueryExecutor, err := infrateamquery.NewLuaExecutor(infrateamquery.DefaultLimits(), infrateamquery.WithRosterReader(database.Store.RosterReader()))
+	teamReadService, err := team.NewQueryService(database.Store.Teams())
+	if err != nil {
+		fmt.Fprintf(stderr, "初始化球队读取服务失败: %v\n", err)
+		return 1
+	}
+	rosterReadService, err := roster.NewQueryService(database.Store.RosterReader())
+	if err != nil {
+		fmt.Fprintf(stderr, "初始化名单读取服务失败: %v\n", err)
+		return 1
+	}
+	gameReadService, err := game.NewQueryService(database.Store)
+	if err != nil {
+		fmt.Fprintf(stderr, "初始化比赛读取服务失败: %v\n", err)
+		return 1
+	}
+	teamQueryExecutor, err := infrateamquery.NewLuaExecutor(infrateamquery.DefaultLimits(), infrateamquery.WithRosterServices(teamReadService, rosterReadService), infrateamquery.WithGameService(gameReadService))
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化球队查询 Lua 执行器失败: %v\n", err)
 		return 1
@@ -111,7 +127,12 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 		fmt.Fprintf(stderr, "初始化名单写入服务失败: %v\n", err)
 		return 1
 	}
-	teamModifyTool, err := basetiontools.NewTeamModify(teamService, playerService, rosterService)
+	gameService, err := game.NewService(database.Store, clock)
+	if err != nil {
+		fmt.Fprintf(stderr, "初始化比赛写入服务失败: %v\n", err)
+		return 1
+	}
+	teamModifyTool, err := basetiontools.NewTeamModify(teamService, playerService, rosterService, gameService)
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化球队修改工具失败: %v\n", err)
 		return 1

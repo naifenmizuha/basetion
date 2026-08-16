@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/naifenmizuha/basetion/src/internal/domain/game"
 	domainroster "github.com/naifenmizuha/basetion/src/internal/domain/roster"
 )
 
@@ -36,6 +37,25 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 		return nil, err
 	}
 	return store, nil
+}
+
+func (s *Store) WithinGameTransaction(ctx context.Context, fn func(game.Repositories) error) error {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin game transaction: %w", err)
+	}
+	repositories := game.Repositories{
+		Matches: &MatchRepository{db: tx}, Lineups: &LineupRepository{db: tx}, Plates: &PlateRepository{db: tx},
+		Teams: &TeamRepository{db: tx}, Players: &PlayerRepository{db: tx},
+	}
+	if err := fn(repositories); err != nil {
+		_ = tx.Rollback(ctx)
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit game transaction: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) Close() { s.pool.Close() }

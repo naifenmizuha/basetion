@@ -53,6 +53,7 @@ type Player struct {
 	version   uint64
 	createdAt time.Time
 	updatedAt time.Time
+	deletedAt *time.Time
 }
 
 func New(id ID, name string, batting, throwing HandFlags, positions PositionFlags, now time.Time) (Player, error) {
@@ -60,7 +61,11 @@ func New(id ID, name string, batting, throwing HandFlags, positions PositionFlag
 }
 
 func Restore(id ID, name string, batting, throwing HandFlags, positions PositionFlags, active bool, version uint64, createdAt, updatedAt time.Time) (Player, error) {
-	player, err := restore(id, name, batting, throwing, positions, active, version, createdAt, updatedAt)
+	return RestoreDeleted(id, name, batting, throwing, positions, active, version, createdAt, updatedAt, nil)
+}
+
+func RestoreDeleted(id ID, name string, batting, throwing HandFlags, positions PositionFlags, active bool, version uint64, createdAt, updatedAt time.Time, deletedAt *time.Time) (Player, error) {
+	player, err := restoreDeleted(id, name, batting, throwing, positions, active, version, createdAt, updatedAt, deletedAt)
 	if err != nil {
 		return Player{}, fmt.Errorf("%w: %v", ErrCorruptedData, err)
 	}
@@ -68,6 +73,10 @@ func Restore(id ID, name string, batting, throwing HandFlags, positions Position
 }
 
 func restore(id ID, name string, batting, throwing HandFlags, positions PositionFlags, active bool, version uint64, createdAt, updatedAt time.Time) (Player, error) {
+	return restoreDeleted(id, name, batting, throwing, positions, active, version, createdAt, updatedAt, nil)
+}
+
+func restoreDeleted(id ID, name string, batting, throwing HandFlags, positions PositionFlags, active bool, version uint64, createdAt, updatedAt time.Time, deletedAt *time.Time) (Player, error) {
 	name = strings.TrimSpace(name)
 	switch {
 	case id == "":
@@ -86,8 +95,10 @@ func restore(id ID, name string, batting, throwing HandFlags, positions Position
 		return Player{}, errors.New("player timestamps are required")
 	case updatedAt.Before(createdAt):
 		return Player{}, errors.New("player updated time precedes creation")
+	case deletedAt != nil && deletedAt.Before(createdAt):
+		return Player{}, errors.New("player deleted time precedes creation")
 	}
-	return Player{id: id, name: name, batting: batting, throwing: throwing, positions: positions, active: active, version: version, createdAt: createdAt, updatedAt: updatedAt}, nil
+	return Player{id: id, name: name, batting: batting, throwing: throwing, positions: positions, active: active, version: version, createdAt: createdAt, updatedAt: updatedAt, deletedAt: cloneTime(deletedAt)}, nil
 }
 
 func (p Player) ID() ID                   { return p.id }
@@ -99,8 +110,13 @@ func (p Player) Active() bool             { return p.active }
 func (p Player) Version() uint64          { return p.version }
 func (p Player) CreatedAt() time.Time     { return p.createdAt }
 func (p Player) UpdatedAt() time.Time     { return p.updatedAt }
+func (p Player) DeletedAt() *time.Time    { return cloneTime(p.deletedAt) }
+func (p Player) Deleted() bool            { return p.deletedAt != nil }
 
 func (p *Player) UpdateProfile(name string, batting, throwing HandFlags, positions PositionFlags, now time.Time) error {
+	if p.Deleted() {
+		return ErrNotFound
+	}
 	updated, err := restore(p.id, name, batting, throwing, positions, p.active, p.version, p.createdAt, now)
 	if err != nil {
 		return err
@@ -111,9 +127,31 @@ func (p *Player) UpdateProfile(name string, batting, throwing HandFlags, positio
 }
 
 func (p *Player) SetActive(active bool, now time.Time) error {
+	if p.Deleted() {
+		return ErrNotFound
+	}
 	if now.Before(p.createdAt) {
 		return errors.New("player update time precedes creation")
 	}
 	p.active, p.updatedAt, p.version = active, now, p.version+1
 	return nil
+}
+
+func (p *Player) Delete(now time.Time) error {
+	if p.Deleted() {
+		return ErrNotFound
+	}
+	if now.Before(p.createdAt) {
+		return errors.New("player deleted time precedes creation")
+	}
+	p.deletedAt, p.updatedAt, p.version = cloneTime(&now), now, p.version+1
+	return nil
+}
+
+func cloneTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }

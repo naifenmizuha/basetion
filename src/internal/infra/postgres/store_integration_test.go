@@ -12,10 +12,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	appconfig "github.com/naifenmizuha/basetion/src/internal/config"
+	"github.com/naifenmizuha/basetion/src/internal/domain/game"
 	"github.com/naifenmizuha/basetion/src/internal/domain/player"
 	"github.com/naifenmizuha/basetion/src/internal/domain/roster"
 	"github.com/naifenmizuha/basetion/src/internal/domain/team"
-	"github.com/naifenmizuha/basetion/src/internal/domain/teamquery"
 )
 
 type fixedClock struct{ now time.Time }
@@ -79,19 +79,43 @@ func integrationStoreWithConfig(t *testing.T, profile appconfig.DatabaseProfileC
 
 func TestPostgresDevelopmentFixtures(t *testing.T) {
 	store := integrationStoreWithConfig(t, integrationProfile(t), WithDevelopmentFixtures())
-	teams, err := store.RosterReader().ListTeams(context.Background(), true)
+	teams, err := store.Teams().List(context.Background(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(teams) != 1 || teams[0].Name != "季汉队" {
+	if len(teams) != 2 {
 		t.Fatalf("teams=%#v", teams)
 	}
-	players, err := store.RosterReader().ListPlayers(context.Background(), teamquery.RosterPlayerFilter{TeamID: teams[0].ID})
+	teamIDs := map[string]string{}
+	for _, value := range teams {
+		teamIDs[value.Name()] = string(value.ID())
+	}
+	players, err := store.RosterReader().ListPlayers(context.Background(), roster.PlayerFilter{TeamID: team.ID(teamIDs["季汉队"])})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(players) != 20 || players[0].Name != "张飞" || players[19].Name != "庞统" {
+	if len(players) != 20 || players[0].Player.Name() != "张飞" || players[19].Player.Name() != "庞统" {
 		t.Fatalf("players=%#v", players)
+	}
+	weiPlayers, err := store.RosterReader().ListPlayers(context.Background(), roster.PlayerFilter{TeamID: team.ID(teamIDs["曹魏队"])})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(weiPlayers) != 20 {
+		t.Fatalf("wei players=%#v", weiPlayers)
+	}
+	detail, err := store.GameDetail(context.Background(), "00000000-0000-0000-0000-000000000201")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Lineups) != 4 || len(detail.Plates) != 6 {
+		t.Fatalf("game detail=%#v", detail)
+	}
+	if detail.Match.Status() != game.MatchScheduled {
+		t.Fatalf("match status=%v", detail.Match.Status())
+	}
+	if score := detail.Plates[len(detail.Plates)-1].Score(); score == nil || score.Home != 0 || score.Away != 1 {
+		t.Fatalf("fixture score=%#v", score)
 	}
 }
 
@@ -181,11 +205,11 @@ func TestPostgresConcurrentJerseyAssignmentAndRead(t *testing.T) {
 	if successes != 1 || occupied != 1 {
 		t.Fatalf("successes=%d occupied=%d errors=%v", successes, occupied, errorsFound)
 	}
-	views, err := store.RosterReader().ListPlayers(context.Background(), teamquery.RosterPlayerFilter{TeamID: string(teamID)})
+	views, err := store.RosterReader().ListPlayers(context.Background(), roster.PlayerFilter{TeamID: teamID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(views) != 1 || views[0].JerseyNumber != 18 || views[0].JoinedAt != "2026-08-01" {
+	if len(views) != 1 || views[0].Membership.JerseyNumber() != 18 || views[0].Membership.JoinedAt().String() != "2026-08-01" {
 		t.Fatalf("views=%#v", views)
 	}
 }
@@ -240,5 +264,102 @@ WHERE r.relname IN ('teams','players','memberships')
 	}
 	if count != 0 {
 		t.Fatalf("found %d non-primary-key constraints", count)
+	}
+}
+
+func TestPostgresGameCRUDAndExplicitSoftDelete(t *testing.T) {
+	store := integrationStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	clock := fixedClock{now: now}
+	teamService, _ := team.NewService(store.Teams(), clock)
+	playerService, _ := player.NewService(store.Players(), clock)
+	home := team.ID("00000000-0000-0000-0000-000000000101")
+	away := team.ID("00000000-0000-0000-0000-000000000102")
+	for _, item := range []struct {
+		id   team.ID
+		name string
+	}{{home, "Home"}, {away, "Away"}} {
+		if _, err := teamService.Create(ctx, item.id, item.name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	players := []player.ID{"00000000-0000-0000-0000-000000000111", "00000000-0000-0000-0000-000000000112"}
+	for i, id := range players {
+		if _, err := playerService.Create(ctx, id, fmt.Sprintf("Game Player %d", i+1), player.HandLeft, player.HandRight, player.PositionPitcher|player.PositionOutfielder); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service, err := game.NewService(store, clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	match, _ := game.NewMatch("00000000-0000-0000-0000-000000000121", home, away, now.Add(time.Hour), "Field", game.MatchScheduled, now)
+	if err = service.CreateMatch(ctx, match); err != nil {
+		t.Fatal(err)
+	}
+	one, _ := game.NewLineupEntry("00000000-0000-0000-0000-000000000131", players[0], 1, player.PositionPitcher)
+	lineup, _ := game.NewLineup(match.ID(), home, game.LineupStarter, 0, "Starter", []game.LineupEntry{one}, now)
+	if err = service.CreateLineup(ctx, lineup); err != nil {
+		t.Fatal(err)
+	}
+	plate, _ := game.NewPlate("00000000-0000-0000-0000-000000000141", match.ID(), 1, 1, game.Top, 1, players[0], players[1], "BSSBF", game.PlateSingle, "Single", [3]*player.ID{}, 0, 0, now)
+	if err = service.CreatePlate(ctx, plate); err != nil {
+		t.Fatal(err)
+	}
+	detail, err := store.GameDetail(ctx, match.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Lineups) != 1 || len(detail.Plates) != 1 {
+		t.Fatalf("detail=%#v", detail)
+	}
+	clock.now = now.Add(2 * time.Hour)
+	service, _ = game.NewService(store, clock)
+	if err = service.DeleteMatch(ctx, match.ID()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Matches().Get(ctx, match.ID()); !errors.Is(err, game.ErrMatchNotFound) {
+		t.Fatalf("deleted match error=%v", err)
+	}
+	for table, want := range map[string]int{"matches": 1, "lineups": 1, "plates": 1} {
+		var got int
+		if err = store.pool.QueryRow(ctx, `SELECT count(*) FROM `+table+` WHERE deleted_at IS NOT NULL`).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("%s deleted=%d", table, got)
+		}
+	}
+}
+
+func TestPostgresTeamSoftDeleteAlsoDeletesMemberships(t *testing.T) {
+	store := integrationStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	service := seedRoster(t, store, fixedClock{now: now})
+	joined, _ := roster.ParseDate("2026-08-01")
+	teamID := team.ID("00000000-0000-0000-0000-000000000001")
+	playerID := player.ID("00000000-0000-0000-0000-000000000011")
+	if _, err := service.Assign(ctx, "00000000-0000-0000-0000-000000000021", teamID, playerID, 18, joined); err != nil {
+		t.Fatal(err)
+	}
+	deleteService, _ := roster.NewService(store, fixedClock{now: now.Add(time.Hour)})
+	if err := deleteService.DeleteTeam(ctx, teamID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Teams().Get(ctx, teamID); !errors.Is(err, team.ErrNotFound) {
+		t.Fatalf("team error=%v", err)
+	}
+	var teamActive bool
+	var deletedMemberships int
+	if err := store.pool.QueryRow(ctx, `SELECT active FROM teams WHERE id=$1`, teamID).Scan(&teamActive); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.pool.QueryRow(ctx, `SELECT count(*) FROM memberships WHERE team_id=$1 AND deleted_at IS NOT NULL`, teamID).Scan(&deletedMemberships); err != nil {
+		t.Fatal(err)
+	}
+	if !teamActive || deletedMemberships != 1 {
+		t.Fatalf("active=%v deleted memberships=%d", teamActive, deletedMemberships)
 	}
 }
