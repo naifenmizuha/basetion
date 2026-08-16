@@ -18,7 +18,7 @@ Skill Middleware 使用 Eino Ext 本地文件 Backend，从进程当前工作目
 当前必需 Skill 为：
 
 - `project-knowledge`：提供 Basetion 定位、当前能力、六层职责、Session/Checkpoint 区别和明确限制。
-- `manage-team`：规定先用 `team_query` 获取事实与稳定 ID，再按需发现并经用户确认后调用 `team_modify`，并约束失败与不可用状态处理。
+- `manage-team`：规定先用 `team_query` 获取事实与稳定 ID，再一次加载所需修改说明并获得用户对完整修改批次的确认；多个可独立确定参数的修改合并为一次有序批量调用，并按非原子、遇错中止的结果语义处理失败与未执行步骤。
 
 Skill 中间件动态提供模型可见的 `skill` 工具；业务工具列表显式注册 `team_query` 和 `team_modify`。两个 Skill 均为自包含单文件，当前不使用引用文件或通用文件读取能力。
 

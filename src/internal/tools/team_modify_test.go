@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -18,10 +19,23 @@ var modifyTestNow = time.Date(2026, 8, 16, 9, 0, 0, 0, time.UTC)
 type modifyStub struct {
 	lastOperation string
 	lastID        string
+	operations    []string
+	failOperation string
+}
+
+func (s *modifyStub) record(operation, id string) error {
+	s.lastOperation, s.lastID = operation, id
+	s.operations = append(s.operations, operation)
+	if s.failOperation == operation {
+		return errors.New("injected failure")
+	}
+	return nil
 }
 
 func (s *modifyStub) Create(ctx context.Context, id team.ID, name string) (team.Team, error) {
-	s.lastOperation, s.lastID = "team.create", string(id)
+	if err := s.record("team.create", string(id)); err != nil {
+		return team.Team{}, err
+	}
 	return team.New(id, name, modifyTestNow)
 }
 
@@ -32,11 +46,15 @@ func (s *modifyStub) CreatePlayer(ctx context.Context, id player.ID, name string
 type playerModifyStub struct{ state *modifyStub }
 
 func (s playerModifyStub) Create(ctx context.Context, id player.ID, name string, batting, throwing player.HandFlags, positions player.PositionFlags) (player.Player, error) {
-	s.state.lastOperation, s.state.lastID = "player.create", string(id)
+	if err := s.state.record("player.create", string(id)); err != nil {
+		return player.Player{}, err
+	}
 	return player.New(id, name, batting, throwing, positions, modifyTestNow)
 }
 func (s playerModifyStub) Update(ctx context.Context, id player.ID, name string, batting, throwing player.HandFlags, positions player.PositionFlags) (player.Player, error) {
-	s.state.lastOperation, s.state.lastID = "player.update", string(id)
+	if err := s.state.record("player.update", string(id)); err != nil {
+		return player.Player{}, err
+	}
 	value, err := player.New(id, name, batting, throwing, positions, modifyTestNow)
 	if err == nil {
 		err = value.UpdateProfile(name, batting, throwing, positions, modifyTestNow.Add(time.Minute))
@@ -44,7 +62,9 @@ func (s playerModifyStub) Update(ctx context.Context, id player.ID, name string,
 	return value, err
 }
 func (s playerModifyStub) SetActive(ctx context.Context, id player.ID, active bool) (player.Player, error) {
-	s.state.lastOperation, s.state.lastID = "player.set_active", string(id)
+	if err := s.state.record("player.set_active", string(id)); err != nil {
+		return player.Player{}, err
+	}
 	value, err := player.New(id, "测试球员", player.HandRight, player.HandRight, player.PositionPitcher, modifyTestNow)
 	if err == nil {
 		err = value.SetActive(active, modifyTestNow.Add(time.Minute))
@@ -55,11 +75,15 @@ func (s playerModifyStub) SetActive(ctx context.Context, id player.ID, active bo
 type rosterModifyStub struct{ state *modifyStub }
 
 func (s rosterModifyStub) Assign(ctx context.Context, id roster.ID, teamID team.ID, playerID player.ID, jersey int, joined roster.Date) (roster.Membership, error) {
-	s.state.lastOperation, s.state.lastID = "roster.assign", string(id)
+	if err := s.state.record("roster.assign", string(id)); err != nil {
+		return roster.Membership{}, err
+	}
 	return roster.New(id, teamID, playerID, jersey, joined, modifyTestNow)
 }
 func (s rosterModifyStub) ChangeJersey(ctx context.Context, teamID team.ID, id roster.ID, jersey int) (roster.Membership, error) {
-	s.state.lastOperation, s.state.lastID = "roster.change_jersey", string(id)
+	if err := s.state.record("roster.change_jersey", string(id)); err != nil {
+		return roster.Membership{}, err
+	}
 	joined, _ := roster.ParseDate("2026-08-01")
 	value, err := roster.New(id, teamID, player.ID("00000000-0000-0000-0000-000000000003"), 8, joined, modifyTestNow)
 	if err == nil {
@@ -68,7 +92,9 @@ func (s rosterModifyStub) ChangeJersey(ctx context.Context, teamID team.ID, id r
 	return value, err
 }
 func (s rosterModifyStub) Leave(ctx context.Context, teamID team.ID, id roster.ID, left roster.Date) (roster.Membership, error) {
-	s.state.lastOperation, s.state.lastID = "roster.leave", string(id)
+	if err := s.state.record("roster.leave", string(id)); err != nil {
+		return roster.Membership{}, err
+	}
 	joined, _ := roster.ParseDate("2026-08-01")
 	value, err := roster.New(id, teamID, player.ID("00000000-0000-0000-0000-000000000003"), 8, joined, modifyTestNow)
 	if err == nil {
@@ -134,6 +160,89 @@ func TestTeamModifyExecutesAllOperations(t *testing.T) {
 		}
 		if state.lastOperation != test.operation || state.lastID != test.wantID || !strings.Contains(output, `"operation":"`+test.operation+`"`) {
 			t.Fatalf("%s: state=%#v output=%s", test.operation, state, output)
+		}
+	}
+}
+
+func TestTeamModifyExecutesBatchInOrder(t *testing.T) {
+	t.Parallel()
+	state, modifyTool := newTestTeamModifyTool(t)
+	outputJSON, err := modifyTool.InvokableRun(context.Background(), `{
+		"mode":"execute",
+		"operations":[
+			{"key":"create-team","operation":"team.create","arguments":{"name":"一队"}},
+			{"key":"create-player","operation":"player.create","arguments":{"name":"甲","batting_hands":["left"],"throwing_hands":["right"],"positions":["pitcher"]}},
+			{"key":"disable-player","operation":"player.set_active","arguments":{"player_id":"00000000-0000-0000-0000-000000000003","active":false}}
+		],
+		"confirmed":true
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output teamModifyOutput
+	if err := json.Unmarshal([]byte(outputJSON), &output); err != nil {
+		t.Fatal(err)
+	}
+	wantOperations := []string{"team.create", "player.create", "player.set_active"}
+	if output.Status != "succeeded" || output.StoppedAt != nil || len(output.Results) != 3 {
+		t.Fatalf("output=%#v", output)
+	}
+	if strings.Join(state.operations, ",") != strings.Join(wantOperations, ",") {
+		t.Fatalf("operations=%v", state.operations)
+	}
+	for index, result := range output.Results {
+		if result.Index != index || result.Status != "succeeded" || result.Operation != wantOperations[index] {
+			t.Fatalf("result[%d]=%#v", index, result)
+		}
+	}
+}
+
+func TestTeamModifyBatchStopsAndReportsFailure(t *testing.T) {
+	t.Parallel()
+	state, modifyTool := newTestTeamModifyTool(t)
+	state.failOperation = "player.set_active"
+	outputJSON, err := modifyTool.InvokableRun(context.Background(), `{
+		"mode":"execute",
+		"operations":[
+			{"key":"create-team","operation":"team.create","arguments":{"name":"一队"}},
+			{"key":"disable-player","operation":"player.set_active","arguments":{"player_id":"00000000-0000-0000-0000-000000000003","active":false}},
+			{"key":"leave-player","operation":"roster.leave","arguments":{"team_id":"00000000-0000-0000-0000-000000000002","membership_id":"00000000-0000-0000-0000-000000000004","left_at":"2026-08-16"}}
+		],
+		"confirmed":true
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output teamModifyOutput
+	if err := json.Unmarshal([]byte(outputJSON), &output); err != nil {
+		t.Fatal(err)
+	}
+	if output.Status != "stopped" || output.StoppedAt == nil || output.StoppedAt.Index != 1 || output.StoppedAt.Key != "disable-player" || output.StoppedAt.Reason != "injected failure" {
+		t.Fatalf("output=%#v", output)
+	}
+	if len(output.Results) != 3 || output.Results[0].Status != "succeeded" || output.Results[1].Status != "failed" || output.Results[2].Status != "skipped" {
+		t.Fatalf("results=%#v", output.Results)
+	}
+	if strings.Join(state.operations, ",") != "team.create,player.set_active" {
+		t.Fatalf("operations=%v", state.operations)
+	}
+}
+
+func TestTeamModifyBatchValidatesBeforeWriting(t *testing.T) {
+	t.Parallel()
+	tests := []string{
+		`{"mode":"execute","operations":[],"confirmed":true}`,
+		`{"mode":"execute","operation":"team.create","arguments":{"name":"一队"},"operations":[{"key":"other","operation":"team.create","arguments":{"name":"二队"}}],"confirmed":true}`,
+		`{"mode":"execute","operations":[{"key":"same","operation":"team.create","arguments":{"name":"一队"}},{"key":"same","operation":"team.create","arguments":{"name":"二队"}}],"confirmed":true}`,
+		`{"mode":"execute","operations":[{"key":"valid","operation":"team.create","arguments":{"name":"一队"}},{"key":"invalid","operation":"roster.leave","arguments":{"team_id":"t","membership_id":"m","left_at":"bad"}}],"confirmed":true}`,
+	}
+	for _, input := range tests {
+		state, modifyTool := newTestTeamModifyTool(t)
+		if _, err := modifyTool.InvokableRun(context.Background(), input); err == nil {
+			t.Fatalf("invalid batch accepted: %s", input)
+		}
+		if len(state.operations) != 0 {
+			t.Fatalf("batch wrote before validation completed: operations=%v input=%s", state.operations, input)
 		}
 	}
 }

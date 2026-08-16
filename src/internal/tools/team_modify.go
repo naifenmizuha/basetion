@@ -46,11 +46,18 @@ func WithTeamModifyIDGenerator(generator IDGenerator) TeamModifyOption {
 }
 
 type teamModifyInput struct {
-	Mode      string          `json:"mode" jsonschema:"required,description=操作模式：describe 按需加载修改操作说明，execute 执行预定义操作,enum=describe,enum=execute"`
-	Topics    *[]string       `json:"topics,omitempty" jsonschema:"description=仅 describe 使用：要加载的精确操作 topic；省略时返回顶层目录"`
-	Operation *string         `json:"operation,omitempty" jsonschema:"description=仅 execute 使用：通过 describe 获得的精确操作名称"`
-	Arguments *map[string]any `json:"arguments,omitempty" jsonschema:"description=仅 execute 使用：操作所需的结构化参数"`
-	Confirmed *bool           `json:"confirmed,omitempty" jsonschema:"description=仅 execute 使用：用户确认完整修改后必须为 true"`
+	Mode       string               `json:"mode" jsonschema:"required,description=操作模式：describe 按需加载修改操作说明，execute 执行预定义操作,enum=describe,enum=execute"`
+	Topics     *[]string            `json:"topics,omitempty" jsonschema:"description=仅 describe 使用：要加载的精确操作 topic；省略时返回顶层目录"`
+	Operation  *string              `json:"operation,omitempty" jsonschema:"description=仅 execute 单项调用使用：通过 describe 获得的精确操作名称"`
+	Arguments  *map[string]any      `json:"arguments,omitempty" jsonschema:"description=仅 execute 单项调用使用：操作所需的结构化参数"`
+	Operations *[]teamModifyRequest `json:"operations,omitempty" jsonschema:"description=仅 execute 批量调用使用：按数组顺序执行的操作；与 operation 和 arguments 互斥"`
+	Confirmed  *bool                `json:"confirmed,omitempty" jsonschema:"description=仅 execute 使用：用户确认完整修改后必须为 true"`
+}
+
+type teamModifyRequest struct {
+	Key       string         `json:"key" jsonschema:"required,description=批次内唯一且非空的步骤标识"`
+	Operation string         `json:"operation" jsonschema:"required,description=通过 describe 获得的精确操作名称"`
+	Arguments map[string]any `json:"arguments" jsonschema:"required,description=操作所需的结构化参数"`
 }
 
 type modifyFieldDescription struct {
@@ -82,7 +89,28 @@ type teamModifyOutput struct {
 	Topics    []modifyTopicDescription `json:"topics,omitempty"`
 	Operation string                   `json:"operation,omitempty"`
 	Result    any                      `json:"result,omitempty"`
+	Status    string                   `json:"status,omitempty"`
+	Results   []teamModifyResult       `json:"results,omitempty"`
+	StoppedAt *teamModifyStoppedAt     `json:"stopped_at,omitempty"`
 }
+
+type teamModifyResult struct {
+	Index     int    `json:"index"`
+	Key       string `json:"key"`
+	Operation string `json:"operation"`
+	Status    string `json:"status"`
+	Result    any    `json:"result,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+type teamModifyStoppedAt struct {
+	Index     int    `json:"index"`
+	Key       string `json:"key"`
+	Operation string `json:"operation"`
+	Reason    string `json:"reason"`
+}
+
+const maxTeamModifyBatchSize = 50
 
 type modifyOperation struct {
 	name       string
@@ -114,7 +142,7 @@ func NewTeamModify(teams TeamModifier, players PlayerModifier, rosters RosterMod
 	handler := &teamModifyHandler{teams: teams, players: players, rosters: rosters, newID: settings.newID, operations: defaultModifyOperations()}
 	return toolutils.InferTool(
 		TeamModifyToolName,
-		"发现并执行预定义的球队数据修改操作。先用 describe 加载操作及参数；获得用户对完整修改的明确确认后，才能用 execute 执行。该工具不接受脚本或数据库语句。",
+		"发现并执行预定义的球队数据修改操作。先用 describe 一次加载所需操作及参数；获得用户对完整修改的明确确认后，才能用 execute 执行。多个修改通过 operations 一次提交，按数组顺序执行，遇错中止且不回滚，并返回失败位置、原因和未执行步骤。该工具不接受脚本或数据库语句。",
 		handler.invoke,
 	)
 }
@@ -122,7 +150,7 @@ func NewTeamModify(teams TeamModifier, players PlayerModifier, rosters RosterMod
 func (h *teamModifyHandler) invoke(ctx context.Context, input teamModifyInput) (teamModifyOutput, error) {
 	switch strings.TrimSpace(input.Mode) {
 	case "describe":
-		if input.Operation != nil || input.Arguments != nil || input.Confirmed != nil {
+		if input.Operation != nil || input.Arguments != nil || input.Operations != nil || input.Confirmed != nil {
 			return teamModifyOutput{}, errors.New("team_modify describe only accepts topics")
 		}
 		return teamModifyOutput{Mode: "describe", Topics: h.describe(stringSlice(input.Topics))}, nil
@@ -132,6 +160,12 @@ func (h *teamModifyHandler) invoke(ctx context.Context, input teamModifyInput) (
 		}
 		if input.Confirmed == nil || !*input.Confirmed {
 			return teamModifyOutput{}, errors.New("team_modify execute requires confirmed=true after user confirmation")
+		}
+		if input.Operations != nil {
+			if input.Operation != nil || input.Arguments != nil {
+				return teamModifyOutput{}, errors.New("team_modify execute accepts either operations or operation with arguments, not both")
+			}
+			return h.executeBatch(ctx, *input.Operations)
 		}
 		operation := strings.TrimSpace(stringValue(input.Operation))
 		if _, exists := h.operations[operation]; !exists {
@@ -148,6 +182,56 @@ func (h *teamModifyHandler) invoke(ctx context.Context, input teamModifyInput) (
 	default:
 		return teamModifyOutput{}, fmt.Errorf("team_modify mode must be describe or execute, got %q", input.Mode)
 	}
+}
+
+func (h *teamModifyHandler) executeBatch(ctx context.Context, requests []teamModifyRequest) (teamModifyOutput, error) {
+	if len(requests) == 0 {
+		return teamModifyOutput{}, errors.New("team_modify execute operations must not be empty")
+	}
+	if len(requests) > maxTeamModifyBatchSize {
+		return teamModifyOutput{}, fmt.Errorf("team_modify execute accepts at most %d operations", maxTeamModifyBatchSize)
+	}
+	seen := make(map[string]struct{}, len(requests))
+	for index := range requests {
+		request := &requests[index]
+		request.Key = strings.TrimSpace(request.Key)
+		request.Operation = strings.TrimSpace(request.Operation)
+		if request.Key == "" {
+			return teamModifyOutput{}, fmt.Errorf("team_modify operation at index %d requires a non-empty key", index)
+		}
+		if _, exists := seen[request.Key]; exists {
+			return teamModifyOutput{}, fmt.Errorf("team_modify operation at index %d has duplicate key %q", index, request.Key)
+		}
+		seen[request.Key] = struct{}{}
+		if _, exists := h.operations[request.Operation]; !exists {
+			return teamModifyOutput{}, fmt.Errorf("team_modify operation at index %d (%s) is unknown: %q", index, request.Key, request.Operation)
+		}
+		if request.Arguments == nil {
+			return teamModifyOutput{}, fmt.Errorf("team_modify operation at index %d (%s) requires arguments", index, request.Key)
+		}
+		if err := validateModifyArguments(request.Operation, request.Arguments); err != nil {
+			return teamModifyOutput{}, fmt.Errorf("validate team_modify operation at index %d (%s, %s): %w", index, request.Key, request.Operation, err)
+		}
+	}
+
+	output := teamModifyOutput{Mode: "execute", Status: "succeeded", Results: make([]teamModifyResult, 0, len(requests))}
+	for index, request := range requests {
+		result, err := h.execute(ctx, request.Operation, request.Arguments)
+		if err == nil {
+			output.Results = append(output.Results, teamModifyResult{Index: index, Key: request.Key, Operation: request.Operation, Status: "succeeded", Result: result})
+			continue
+		}
+		reason := err.Error()
+		output.Status = "stopped"
+		output.StoppedAt = &teamModifyStoppedAt{Index: index, Key: request.Key, Operation: request.Operation, Reason: reason}
+		output.Results = append(output.Results, teamModifyResult{Index: index, Key: request.Key, Operation: request.Operation, Status: "failed", Error: reason})
+		for skippedIndex := index + 1; skippedIndex < len(requests); skippedIndex++ {
+			skipped := requests[skippedIndex]
+			output.Results = append(output.Results, teamModifyResult{Index: skippedIndex, Key: skipped.Key, Operation: skipped.Operation, Status: "skipped", Error: fmt.Sprintf("not executed because operation at index %d (%s) failed", index, request.Key)})
+		}
+		break
+	}
+	return output, nil
 }
 
 func (h *teamModifyHandler) describe(requested []string) []modifyTopicDescription {
@@ -368,6 +452,68 @@ func decodeArguments(arguments map[string]any, destination any) error {
 		return errors.New("arguments must contain one object")
 	}
 	return nil
+}
+
+func validateModifyArguments(operation string, arguments map[string]any) error {
+	switch operation {
+	case "team.create":
+		return decodeArguments(arguments, &teamCreateArguments{})
+	case "player.create":
+		var input playerProfileArguments
+		if err := decodeArguments(arguments, &input); err != nil {
+			return err
+		}
+		_, _, _, err := parseProfile(input)
+		return err
+	case "player.update":
+		var input playerUpdateArguments
+		if err := decodeArguments(arguments, &input); err != nil {
+			return err
+		}
+		_, _, _, err := parseProfile(input.playerProfileArguments)
+		return err
+	case "player.set_active":
+		var input playerSetActiveArguments
+		if err := decodeArguments(arguments, &input); err != nil {
+			return err
+		}
+		if input.Active == nil {
+			return errors.New("active is required")
+		}
+		return nil
+	case "roster.assign":
+		var input rosterAssignArguments
+		if err := decodeArguments(arguments, &input); err != nil {
+			return err
+		}
+		if input.JerseyNumber == nil {
+			return errors.New("jersey_number is required")
+		}
+		if _, err := roster.ParseDate(input.JoinedAt); err != nil {
+			return fmt.Errorf("parse joined_at: %w", err)
+		}
+		return nil
+	case "roster.change_jersey":
+		var input rosterChangeJerseyArguments
+		if err := decodeArguments(arguments, &input); err != nil {
+			return err
+		}
+		if input.JerseyNumber == nil {
+			return errors.New("jersey_number is required")
+		}
+		return nil
+	case "roster.leave":
+		var input rosterLeaveArguments
+		if err := decodeArguments(arguments, &input); err != nil {
+			return err
+		}
+		if _, err := roster.ParseDate(input.LeftAt); err != nil {
+			return fmt.Errorf("parse left_at: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown team modify operation %q", operation)
+	}
 }
 
 func parseProfile(input playerProfileArguments) (player.HandFlags, player.HandFlags, player.PositionFlags, error) {
