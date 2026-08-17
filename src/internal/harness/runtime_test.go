@@ -186,7 +186,7 @@ func TestRuntimeLoadsProjectKnowledgeSkill(t *testing.T) {
 		t.Fatalf("system instruction was not injected: %#v", firstInput)
 	}
 	systemText := firstInput[0].ContentBlocks[0].UserInputText.Text
-	if !strings.Contains(systemText, "你是 Basetion") || !strings.Contains(systemText, "Skill") || len(systemText) <= len(defaultInstruction) {
+	if !strings.Contains(systemText, "你是 Basetion") || !strings.Contains(systemText, "必须等待 Skill 结果返回后") || len(systemText) <= len(defaultInstruction) {
 		t.Fatalf("system instruction does not include the base and Skill middleware prompts: %q", systemText)
 	}
 	if strings.Contains(logs.String(), "Basetion 是什么") || strings.Contains(logs.String(), "六个职责区域") {
@@ -234,7 +234,7 @@ func TestRuntimeUsesTeamQueryTool(t *testing.T) {
 	for _, message := range messages {
 		for _, block := range message.ContentBlocks {
 			if result := block.FunctionToolResult; result != nil {
-				sawSkillResult = sawSkillResult || result.Name == "skill" && result.CallID == "skill-call" && strings.Contains(result.Content[0].String(), "先调用 `team_query` 的 `describe`")
+				sawSkillResult = sawSkillResult || result.Name == "skill" && result.CallID == "skill-call" && strings.Contains(result.Content[0].String(), "一次调用 `team_query` 的 `describe`")
 				sawTeamQueryResult = sawTeamQueryResult || result.Name == basetiontools.TeamQueryToolName && result.CallID == "team-query-call" && strings.Contains(result.Content[0].String(), `"total":13`)
 			}
 		}

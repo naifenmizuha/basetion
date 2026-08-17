@@ -9,7 +9,7 @@
 
 `src/cmd/basetion/main.go` 使用后台 Context 调用 `bootstrap.Execute`，传入命令行参数、标准输出和标准错误，并以返回值作为进程退出码。业务依赖不在 main 包中构造。
 
-仓库根目录的 `justfile` 通过 `app`、`dep` 与 `test` 三个 Just 模块分别组织应用、长期运行依赖和测试命令；模块源文件位于 `just/`。可使用 `just app run|dev`、`just dep up|down` 与 `just test all|player|player-add|game|training|training-mod` 调用；其中训练命令使用开发 profile 演示近期自训分析与新增自训记录。模块命令会切换到仓库根目录后再执行；应用命令不会隐式启动或停止依赖。
+仓库根目录的 `justfile` 通过 `app`、`dep` 与 `test` 三个 Just 模块分别组织应用、长期运行依赖和测试命令；模块源文件位于 `just/`。可使用 `just app run|dev`、`just dep up|down` 与 `just test all|player|player-add|game|training|training-mod|temp` 调用；其中训练命令使用开发 profile 演示近期自训分析与新增自训记录，`temp` 用一次跨模块比赛查询观察精确 describe、组合 Lua query 与最小结果投影。模块命令会切换到仓库根目录后再执行；应用命令不会隐式启动或停止依赖。
 
 ## CLI 协议
 

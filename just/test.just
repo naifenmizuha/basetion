@@ -17,3 +17,6 @@ training:
 
 training-mod:
     cd {{justfile_directory()}} && GOTOOLCHAIN=auto go run ./src/cmd/basetion --profile dev "我是刘备，我今天(8月18日)投球了150个，感觉投完手有点痛，记一下，自动确认"
+
+temp:
+    cd {{justfile_directory()}} && GOTOOLCHAIN=auto go run ./src/cmd/basetion --profile dev "查一下蜀汉队最近一场已结束的比赛：告诉我对手和最终比分，列出双方首发阵容，并按顺序概括这场比赛的所有打席"
