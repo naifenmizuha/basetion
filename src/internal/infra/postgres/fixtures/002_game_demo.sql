@@ -100,9 +100,10 @@ VALUES
 
 WITH half_innings AS (
     SELECT
-        7 + (row_number() OVER (ORDER BY inning, half) - 1) * 3 AS sequence_start,
+        7 + COALESCE(sum(CASE WHEN (inning, half) IN ((1, 2), (3, 1), (3, 2), (4, 1), (4, 2), (6, 2), (9, 1), (9, 2)) THEN 4 ELSE 3 END) OVER (ORDER BY inning, half ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS sequence_start,
         inning,
-        half
+        half,
+        CASE WHEN (inning, half) IN ((1, 2), (3, 1), (3, 2), (4, 1), (4, 2), (6, 2), (9, 1), (9, 2)) THEN 4 ELSE 3 END AS plate_count
     FROM generate_series(1, 9) AS innings(inning)
     CROSS JOIN (VALUES (1), (2)) AS halves(half)
     WHERE inning > 1 OR half = 2
@@ -113,12 +114,13 @@ WITH half_innings AS (
         half,
         plate_offset
     FROM half_innings
-    CROSS JOIN generate_series(0, 2) AS offsets(plate_offset)
+    CROSS JOIN LATERAL generate_series(0, plate_count - 1) AS offsets(plate_offset)
 ), ordered_plates AS (
     SELECT
         sequence,
         inning,
         half,
+        plate_offset,
         CASE
             WHEN half = 1 THEN ((6 + (inning - 2) * 3 + plate_offset) % 9) + 1
             ELSE (((inning - 1) * 3 + plate_offset) % 9) + 1
@@ -149,14 +151,26 @@ SELECT
         WHEN 1 THEN '00000000-0000-0000-0000-000000000012'::uuid
         ELSE '00000000-0000-0000-0000-000000000032'::uuid
     END,
-    'SSS',
-    8,
-    format('第%s局%s，第%s棒挥棒落空三振出局。', inning, CASE half WHEN 1 THEN '上半' ELSE '下半' END, batting_order),
+    CASE WHEN inning = 9 AND half = 2 AND plate_offset = 3 THEN 'BFS' ELSE (ARRAY['BFS', 'SSS', 'BBF', 'FS', 'BBBB', 'BSSFF']::text[])[((sequence - 1) % 6) + 1] END,
+    CASE WHEN inning = 9 AND half = 2 AND plate_offset = 3 THEN 2 ELSE (ARRAY[2, 8, 1, 6, 3, 11]::smallint[])[((sequence - 1) % 6) + 1] END,
+    CASE WHEN inning = 9 AND half = 2 AND plate_offset = 3 THEN '刘备击出右外野再见一垒安打，蜀汉队以 5:4 获胜。' ELSE (ARRAY[
+        '击出一垒安打，跑者推进。', '挥棒落空三振出局。', '内野滚地球出局。',
+        '选到保送，上垒延续攻势。', '击出外野飞球出局。', '野手选择上垒。'
+    ]::text[])[((sequence - 1) % 6) + 1] END,
     NULL,
     NULL,
     NULL,
-    0,
-    1,
+    CASE
+        WHEN inning < 4 OR (inning = 4 AND half = 1) THEN 2
+        WHEN inning < 6 OR (inning = 6 AND half = 1) THEN 3
+        WHEN inning = 9 AND half = 2 AND plate_offset = 3 THEN 5
+        ELSE 4
+    END,
+    CASE
+        WHEN inning < 3 OR (inning = 3 AND half = 1 AND plate_offset < 3) THEN 1
+        WHEN inning < 9 OR (inning = 9 AND half = 1 AND plate_offset < 3) THEN 3
+        ELSE 4
+    END,
     1,
     now(),
     now()

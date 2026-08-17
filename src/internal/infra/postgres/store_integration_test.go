@@ -151,7 +151,7 @@ func TestPostgresDevelopmentFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(players) != 20 || players[0].Player.Name() != "张飞" || players[19].Player.Name() != "庞统" {
+	if len(players) != 20 {
 		t.Fatalf("players=%#v", players)
 	}
 	weiPlayers, err := store.RosterReader().ListPlayers(context.Background(), roster.PlayerFilter{TeamID: team.ID(teamIDs["曹魏队"])})
@@ -169,28 +169,32 @@ func TestPostgresDevelopmentFixtures(t *testing.T) {
 	if err := store.pool.QueryRow(context.Background(), `SELECT current_date`).Scan(&databaseToday); err != nil {
 		t.Fatal(err)
 	}
-	if len(trainingRecords) != 5 || trainingRecords[0].TrainingDate() != training.DateFromTime(databaseToday) {
+	if len(trainingRecords) != 3 || trainingRecords[0].TrainingDate() != training.DateFromTime(databaseToday) {
 		t.Fatalf("shu training records=%#v", trainingRecords)
 	}
 	trainingRecords, err = store.Training().List(context.Background(), training.Filter{PlayerID: "00000000-0000-0000-0000-000000000031"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(trainingRecords) != 5 || trainingRecords[4].TrainingDate() != training.DateFromTime(databaseToday.AddDate(0, 0, -4)) {
+	if len(trainingRecords) != 2 || trainingRecords[0].TrainingDate() != training.DateFromTime(databaseToday) {
 		t.Fatalf("wei training records=%#v", trainingRecords)
 	}
 	var trainingCount int
 	if err := store.pool.QueryRow(context.Background(), `SELECT count(*) FROM training_records WHERE deleted_at IS NULL`).Scan(&trainingCount); err != nil {
 		t.Fatal(err)
 	}
-	if trainingCount != 200 {
+	noTraining, err := store.Training().List(context.Background(), training.Filter{PlayerID: "00000000-0000-0000-0000-000000000021"})
+	if err != nil || len(noTraining) != 0 {
+		t.Fatalf("player without training records=%#v error=%v", noTraining, err)
+	}
+	if trainingCount != 46 {
 		t.Fatalf("training record count=%d", trainingCount)
 	}
 	detail, err := store.GameDetail(context.Background(), "00000000-0000-0000-0000-000000000201")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(detail.Lineups) != 4 || len(detail.Plates) != 57 {
+	if len(detail.Lineups) != 4 || len(detail.Plates) != 65 {
 		t.Fatalf("game detail=%#v", detail)
 	}
 	if detail.Match.Status() != game.MatchFinal {
@@ -200,7 +204,7 @@ func TestPostgresDevelopmentFixtures(t *testing.T) {
 	if lastPlate.Inning() != 9 || lastPlate.Half() != game.Bottom {
 		t.Fatalf("last fixture plate=%#v", lastPlate)
 	}
-	if score := lastPlate.Score(); score == nil || score.Home != 0 || score.Away != 1 {
+	if score := lastPlate.Score(); score == nil || score.Home != 5 || score.Away != 4 {
 		t.Fatalf("fixture score=%#v", score)
 	}
 }

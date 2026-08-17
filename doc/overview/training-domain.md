@@ -15,3 +15,5 @@
 写 `Service` 通过训练 Repository、球员 Repository 和 Clock 创建、更新及软删除记录。创建时要求球员存在但不要求启用；更新和删除使用版本号实现乐观并发控制。只读 `QueryService` 要求指定球员，可按起止日期过滤并拒绝反向日期范围。
 
 领域层只定义实体、规则和 Repository/Clock 端口。训练能力直接由 `team_modify` 适配写服务，并通过 `team_query` 的只读 Lua 代理查询，不新增 application 子包。
+
+开发 fixture 只为两队中的 18 名球员提供训练记录，共 46 条，日期相对数据库 `current_date` 分布在近 14 天。内容和感想按投手、捕手、内野、外野及跑垒训练区分，未记录训练的球员也保留在名单中，用于展示空查询结果。

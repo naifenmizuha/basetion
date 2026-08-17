@@ -19,3 +19,5 @@
 球队与名单分别提供只读 `QueryService`。球队查询返回经 Repository 恢复的 `Team`；名单查询按球队、日期和守备位置读取由 `Team`、`Player`、`Membership` 组成的 `Member`，并用三个领域对象计算指定日期的有效状态。
 
 领域层只定义实体、业务规则、Repository/UnitOfWork/Clock 端口，不依赖 PostgreSQL、CLI、Eino 或 application 包。模型侧的 `team_modify` 直接适配写服务，`team_query` 通过只读领域服务取得领域对象后再转换成 Lua 数据。
+
+PostgreSQL 开发 fixture 使用蜀汉、曹魏两支虚构业余球队，各保留 20 名启用成员；球员的左右打投、主守备与兼项守备、以及球衣号码用于覆盖投手、捕手、内野和外野的名单查询展示。
