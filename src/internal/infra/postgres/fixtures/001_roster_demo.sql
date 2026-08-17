@@ -1,5 +1,5 @@
 INSERT INTO teams(id, name, active, version, created_at, updated_at)
-VALUES ('00000000-0000-0000-0000-000000000001', '季汉队', TRUE, 1, now(), now());
+VALUES ('00000000-0000-0000-0000-000000000001', '蜀汉队', TRUE, 1, now(), now());
 
 INSERT INTO players(id, name, batting_flags, throwing_flags, position_flags, active, version, created_at, updated_at)
 VALUES

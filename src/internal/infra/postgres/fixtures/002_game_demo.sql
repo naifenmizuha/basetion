@@ -47,8 +47,8 @@ VALUES
     ('00000000-0000-0000-0000-000000000139', '00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000049', 19, '2026-01-01', NULL, 1, now(), now()),
     ('00000000-0000-0000-0000-000000000140', '00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000050', 20, '2026-01-01', NULL, 1, now(), now());
 
-INSERT INTO matches(id, home_team_id, away_team_id, scheduled_at, location, version, created_at, updated_at)
-VALUES ('00000000-0000-0000-0000-000000000201', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', '2026-08-18 19:00:00+08', '成都棒球场', 1, now(), now());
+INSERT INTO matches(id, home_team_id, away_team_id, scheduled_at, location, status, version, created_at, updated_at)
+VALUES ('00000000-0000-0000-0000-000000000201', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', '2026-08-16 19:00:00+08', '成都棒球场', 3, 1, now(), now());
 
 INSERT INTO lineups(id, match_id, team_id, kind, variant_number, variant_name, player_id, batting_order, position, version, created_at, updated_at)
 VALUES
@@ -97,3 +97,68 @@ VALUES
     ('00000000-0000-0000-0000-000000000404', '00000000-0000-0000-0000-000000000201', 4, 1, 1, 4, '00000000-0000-0000-0000-000000000035', '00000000-0000-0000-0000-000000000012', 'BFF', 12, '张辽击出中外野牺牲飞球，曹操返回本垒得分。', NULL, NULL, '00000000-0000-0000-0000-000000000033', 0, 1, 1, now(), now()),
     ('00000000-0000-0000-0000-000000000405', '00000000-0000-0000-0000-000000000201', 5, 1, 1, 5, '00000000-0000-0000-0000-000000000036', '00000000-0000-0000-0000-000000000012', 'BBBFB', 6, '徐晃四坏球保送上一垒。', '00000000-0000-0000-0000-000000000036', NULL, '00000000-0000-0000-0000-000000000033', 0, 1, 1, now(), now()),
     ('00000000-0000-0000-0000-000000000406', '00000000-0000-0000-0000-000000000201', 6, 1, 1, 6, '00000000-0000-0000-0000-000000000037', '00000000-0000-0000-0000-000000000012', 'SSS', 8, '张郃挥棒落空三振，结束一局上半。', NULL, NULL, NULL, 0, 1, 1, now(), now());
+
+WITH half_innings AS (
+    SELECT
+        7 + (row_number() OVER (ORDER BY inning, half) - 1) * 3 AS sequence_start,
+        inning,
+        half
+    FROM generate_series(1, 9) AS innings(inning)
+    CROSS JOIN (VALUES (1), (2)) AS halves(half)
+    WHERE inning > 1 OR half = 2
+), plate_slots AS (
+    SELECT
+        sequence_start + plate_offset AS sequence,
+        inning,
+        half,
+        plate_offset
+    FROM half_innings
+    CROSS JOIN generate_series(0, 2) AS offsets(plate_offset)
+), ordered_plates AS (
+    SELECT
+        sequence,
+        inning,
+        half,
+        CASE
+            WHEN half = 1 THEN ((6 + (inning - 2) * 3 + plate_offset) % 9) + 1
+            ELSE (((inning - 1) * 3 + plate_offset) % 9) + 1
+        END AS batting_order
+    FROM plate_slots
+)
+INSERT INTO plates(id, match_id, sequence, inning, half, batting_order, batter_id, pitcher_id, pitch_sequence, plate_type, result_description, runner_on_first_id, runner_on_second_id, runner_on_third_id, home_score, away_score, version, created_at, updated_at)
+SELECT
+    ('00000000-0000-0000-0000-' || lpad(sequence::text, 12, '0'))::uuid,
+    '00000000-0000-0000-0000-000000000201',
+    sequence,
+    inning,
+    half,
+    batting_order,
+    CASE half
+        WHEN 1 THEN (ARRAY[
+            '00000000-0000-0000-0000-000000000031', '00000000-0000-0000-0000-000000000033', '00000000-0000-0000-0000-000000000034',
+            '00000000-0000-0000-0000-000000000035', '00000000-0000-0000-0000-000000000036', '00000000-0000-0000-0000-000000000037',
+            '00000000-0000-0000-0000-000000000038', '00000000-0000-0000-0000-000000000039', '00000000-0000-0000-0000-000000000032'
+        ]::uuid[])[batting_order]
+        ELSE (ARRAY[
+            '00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000013', '00000000-0000-0000-0000-000000000014',
+            '00000000-0000-0000-0000-000000000015', '00000000-0000-0000-0000-000000000016', '00000000-0000-0000-0000-000000000017',
+            '00000000-0000-0000-0000-000000000018', '00000000-0000-0000-0000-000000000019', '00000000-0000-0000-0000-000000000012'
+        ]::uuid[])[batting_order]
+    END,
+    CASE half
+        WHEN 1 THEN '00000000-0000-0000-0000-000000000012'::uuid
+        ELSE '00000000-0000-0000-0000-000000000032'::uuid
+    END,
+    'SSS',
+    8,
+    format('第%s局%s，第%s棒挥棒落空三振出局。', inning, CASE half WHEN 1 THEN '上半' ELSE '下半' END, batting_order),
+    NULL,
+    NULL,
+    NULL,
+    0,
+    1,
+    1,
+    now(),
+    now()
+FROM ordered_plates
+ORDER BY sequence;

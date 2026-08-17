@@ -90,7 +90,7 @@ func TestPostgresDevelopmentFixtures(t *testing.T) {
 	for _, value := range teams {
 		teamIDs[value.Name()] = string(value.ID())
 	}
-	players, err := store.RosterReader().ListPlayers(context.Background(), roster.PlayerFilter{TeamID: team.ID(teamIDs["季汉队"])})
+	players, err := store.RosterReader().ListPlayers(context.Background(), roster.PlayerFilter{TeamID: team.ID(teamIDs["蜀汉队"])})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,13 +108,17 @@ func TestPostgresDevelopmentFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(detail.Lineups) != 4 || len(detail.Plates) != 6 {
+	if len(detail.Lineups) != 4 || len(detail.Plates) != 57 {
 		t.Fatalf("game detail=%#v", detail)
 	}
-	if detail.Match.Status() != game.MatchScheduled {
+	if detail.Match.Status() != game.MatchFinal {
 		t.Fatalf("match status=%v", detail.Match.Status())
 	}
-	if score := detail.Plates[len(detail.Plates)-1].Score(); score == nil || score.Home != 0 || score.Away != 1 {
+	lastPlate := detail.Plates[len(detail.Plates)-1]
+	if lastPlate.Inning() != 9 || lastPlate.Half() != game.Bottom {
+		t.Fatalf("last fixture plate=%#v", lastPlate)
+	}
+	if score := lastPlate.Score(); score == nil || score.Home != 0 || score.Away != 1 {
 		t.Fatalf("fixture score=%#v", score)
 	}
 }
