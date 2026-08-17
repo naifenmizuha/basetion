@@ -14,6 +14,7 @@ import (
 	"github.com/naifenmizuha/basetion/src/internal/domain/roster"
 	"github.com/naifenmizuha/basetion/src/internal/domain/team"
 	querydomain "github.com/naifenmizuha/basetion/src/internal/domain/teamquery"
+	"github.com/naifenmizuha/basetion/src/internal/domain/training"
 	lua "github.com/yuin/gopher-lua"
 )
 
@@ -49,10 +50,11 @@ func DefaultLimits() Limits {
 }
 
 type LuaExecutor struct {
-	limits Limits
-	teams  *team.QueryService
-	roster *roster.QueryService
-	game   *game.QueryService
+	limits   Limits
+	teams    *team.QueryService
+	roster   *roster.QueryService
+	game     *game.QueryService
+	training *training.QueryService
 }
 
 type Option func(*LuaExecutor) error
@@ -73,6 +75,16 @@ func WithGameService(service *game.QueryService) Option {
 			return errors.New("game query service is required")
 		}
 		executor.game = service
+		return nil
+	}
+}
+
+func WithTrainingService(service *training.QueryService) Option {
+	return func(executor *LuaExecutor) error {
+		if service == nil {
+			return errors.New("training query service is required")
+		}
+		executor.training = service
 		return nil
 	}
 }
@@ -103,6 +115,9 @@ func (e *LuaExecutor) AvailableModules() []string {
 	}
 	if e.game != nil {
 		result = append(result, "game", "lineup")
+	}
+	if e.training != nil {
+		result = append(result, "training")
 	}
 	return result
 }
@@ -252,6 +267,11 @@ func (e *LuaExecutor) newTeamProxy(ctx context.Context, state *lua.LState, expli
 				return nil, errors.New("lineup module is unavailable")
 			}
 			backing.RawSetString("lineup", newLineupProxy(ctx, state, e.game, explicitArrays))
+		case "training":
+			if e.training == nil {
+				return nil, errors.New("training module is unavailable")
+			}
+			backing.RawSetString("training", newTrainingProxy(ctx, state, e.training, explicitArrays))
 		default:
 			return nil, fmt.Errorf("unsupported lua module %q", module)
 		}
@@ -268,6 +288,67 @@ func (e *LuaExecutor) newTeamProxy(ctx context.Context, state *lua.LState, expli
 	meta.RawSetString("__metatable", lua.LFalse)
 	state.SetMetatable(proxy, meta)
 	return proxy, nil
+}
+
+func newTrainingProxy(ctx context.Context, state *lua.LState, service *training.QueryService, explicitArrays map[*lua.LTable]struct{}) *lua.LUserData {
+	backing := state.NewTable()
+	backing.RawSetString("records", state.NewFunction(func(state *lua.LState) int {
+		if state.GetTop() != 1 {
+			state.RaiseError("training.records requires one filter table")
+			return 0
+		}
+		table := state.CheckTable(1)
+		playerID := string(lua.LVAsString(table.RawGetString("player_id")))
+		if playerID == "" {
+			state.RaiseError("training.records requires player_id")
+			return 0
+		}
+		filter := training.Filter{PlayerID: player.ID(playerID)}
+		if value := table.RawGetString("from_date"); value != lua.LNil {
+			parsed, err := training.ParseDate(string(lua.LVAsString(value)))
+			if err != nil {
+				state.RaiseError("invalid training from_date: %v", err)
+				return 0
+			}
+			filter.From = &parsed
+		}
+		if value := table.RawGetString("to_date"); value != lua.LNil {
+			parsed, err := training.ParseDate(string(lua.LVAsString(value)))
+			if err != nil {
+				state.RaiseError("invalid training to_date: %v", err)
+				return 0
+			}
+			filter.To = &parsed
+		}
+		values, err := service.List(ctx, filter)
+		if err != nil {
+			state.RaiseError("list training records: %v", err)
+			return 0
+		}
+		result := state.NewTable()
+		explicitArrays[result] = struct{}{}
+		for _, value := range values {
+			entry := state.NewTable()
+			entry.RawSetString("id", lua.LString(value.ID()))
+			entry.RawSetString("player_id", lua.LString(value.PlayerID()))
+			entry.RawSetString("training_date", lua.LString(value.TrainingDate().String()))
+			entry.RawSetString("content", lua.LString(value.Content()))
+			entry.RawSetString("reflection", lua.LString(value.Reflection()))
+			entry.RawSetString("created_at", lua.LString(value.CreatedAt().Format(time.RFC3339Nano)))
+			entry.RawSetString("updated_at", lua.LString(value.UpdatedAt().Format(time.RFC3339Nano)))
+			result.Append(entry)
+		}
+		state.Push(result)
+		return 1
+	}))
+	proxy := state.NewUserData()
+	proxy.Value = struct{ name string }{name: "training"}
+	meta := state.NewTable()
+	meta.RawSetString("__index", backing)
+	meta.RawSetString("__newindex", state.NewFunction(func(state *lua.LState) int { state.RaiseError("training is read-only"); return 0 }))
+	meta.RawSetString("__metatable", lua.LFalse)
+	state.SetMetatable(proxy, meta)
+	return proxy
 }
 
 var positionNames = map[string]player.PositionFlags{

@@ -16,6 +16,7 @@ import (
 	"github.com/naifenmizuha/basetion/src/internal/domain/player"
 	"github.com/naifenmizuha/basetion/src/internal/domain/roster"
 	"github.com/naifenmizuha/basetion/src/internal/domain/team"
+	"github.com/naifenmizuha/basetion/src/internal/domain/training"
 )
 
 type fixedClock struct{ now time.Time }
@@ -77,6 +78,62 @@ func integrationStoreWithConfig(t *testing.T, profile appconfig.DatabaseProfileC
 	return managed.Store
 }
 
+func TestPostgresTrainingRecordLifecycle(t *testing.T) {
+	store := integrationStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 17, 9, 0, 0, 0, time.UTC)
+	playerID := player.ID("00000000-0000-0000-0000-000000000501")
+	playerService, _ := player.NewService(store.Players(), fixedClock{now: now})
+	if _, err := playerService.Create(ctx, playerID, "Training Player", player.HandRight, player.HandRight, player.PositionPitcher); err != nil {
+		t.Fatal(err)
+	}
+	repository := store.Training()
+	service, _ := training.NewService(repository, store.Players(), fixedClock{now: now.Add(time.Hour)})
+	firstDate, _ := training.ParseDate("2026-08-16")
+	secondDate, _ := training.ParseDate("2026-08-17")
+	first, err := service.Create(ctx, "00000000-0000-0000-0000-000000000511", playerID, firstDate, "跑步", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Create(ctx, "00000000-0000-0000-0000-000000000512", playerID, firstDate, "重复", ""); !errors.Is(err, training.ErrAlreadyExists) {
+		t.Fatalf("duplicate error=%v", err)
+	}
+	second, err := service.Create(ctx, "00000000-0000-0000-0000-000000000513", playerID, secondDate, "打击", "顺畅")
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := service.Update(ctx, second.ID(), "守备", "稳定")
+	if err != nil || updated.Version() != 2 {
+		t.Fatalf("updated=%#v error=%v", updated, err)
+	}
+	from, _ := training.ParseDate("2026-08-16")
+	values, err := repository.List(ctx, training.Filter{PlayerID: playerID, From: &from})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 2 || values[0].ID() != second.ID() || values[1].ID() != first.ID() {
+		t.Fatalf("values=%#v", values)
+	}
+	if err := service.Delete(ctx, first.ID()); err != nil {
+		t.Fatal(err)
+	}
+	values, err = repository.List(ctx, training.Filter{PlayerID: playerID})
+	if err != nil || len(values) != 1 {
+		t.Fatalf("after delete=%#v error=%v", values, err)
+	}
+	if _, err := service.Create(ctx, "00000000-0000-0000-0000-000000000514", playerID, firstDate, "重新记录", ""); err != nil {
+		t.Fatal(err)
+	}
+	rosterService, _ := roster.NewService(store, fixedClock{now: now.Add(2 * time.Hour)})
+	if err := rosterService.DeletePlayer(ctx, playerID); err != nil {
+		t.Fatal(err)
+	}
+	values, err = repository.List(ctx, training.Filter{PlayerID: playerID})
+	if err != nil || len(values) != 0 {
+		t.Fatalf("after player delete=%#v error=%v", values, err)
+	}
+}
+
 func TestPostgresDevelopmentFixtures(t *testing.T) {
 	store := integrationStoreWithConfig(t, integrationProfile(t), WithDevelopmentFixtures())
 	teams, err := store.Teams().List(context.Background(), true)
@@ -103,6 +160,31 @@ func TestPostgresDevelopmentFixtures(t *testing.T) {
 	}
 	if len(weiPlayers) != 20 {
 		t.Fatalf("wei players=%#v", weiPlayers)
+	}
+	trainingRecords, err := store.Training().List(context.Background(), training.Filter{PlayerID: "00000000-0000-0000-0000-000000000011"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var databaseToday time.Time
+	if err := store.pool.QueryRow(context.Background(), `SELECT current_date`).Scan(&databaseToday); err != nil {
+		t.Fatal(err)
+	}
+	if len(trainingRecords) != 5 || trainingRecords[0].TrainingDate() != training.DateFromTime(databaseToday) {
+		t.Fatalf("shu training records=%#v", trainingRecords)
+	}
+	trainingRecords, err = store.Training().List(context.Background(), training.Filter{PlayerID: "00000000-0000-0000-0000-000000000031"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(trainingRecords) != 5 || trainingRecords[4].TrainingDate() != training.DateFromTime(databaseToday.AddDate(0, 0, -4)) {
+		t.Fatalf("wei training records=%#v", trainingRecords)
+	}
+	var trainingCount int
+	if err := store.pool.QueryRow(context.Background(), `SELECT count(*) FROM training_records WHERE deleted_at IS NULL`).Scan(&trainingCount); err != nil {
+		t.Fatal(err)
+	}
+	if trainingCount != 200 {
+		t.Fatalf("training record count=%d", trainingCount)
 	}
 	detail, err := store.GameDetail(context.Background(), "00000000-0000-0000-0000-000000000201")
 	if err != nil {

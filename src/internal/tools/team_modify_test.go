@@ -13,6 +13,7 @@ import (
 	"github.com/naifenmizuha/basetion/src/internal/domain/player"
 	"github.com/naifenmizuha/basetion/src/internal/domain/roster"
 	"github.com/naifenmizuha/basetion/src/internal/domain/team"
+	"github.com/naifenmizuha/basetion/src/internal/domain/training"
 )
 
 var modifyTestNow = time.Date(2026, 8, 16, 9, 0, 0, 0, time.UTC)
@@ -84,6 +85,29 @@ func (s rosterModifyStub) Assign(ctx context.Context, id roster.ID, teamID team.
 
 type gameModifyStub struct{ state *modifyStub }
 
+type trainingModifyStub struct{ state *modifyStub }
+
+func (s trainingModifyStub) Create(_ context.Context, id training.ID, playerID player.ID, date training.Date, content, reflection string) (training.Record, error) {
+	if err := s.state.record("training.create", string(id)); err != nil {
+		return training.Record{}, err
+	}
+	return training.New(id, playerID, date, content, reflection, modifyTestNow)
+}
+func (s trainingModifyStub) Update(_ context.Context, id training.ID, content, reflection string) (training.Record, error) {
+	if err := s.state.record("training.update", string(id)); err != nil {
+		return training.Record{}, err
+	}
+	date, _ := training.ParseDate("2026-08-16")
+	value, err := training.New(id, "player-1", date, "old", "", modifyTestNow)
+	if err == nil {
+		err = value.Update(content, reflection, modifyTestNow.Add(time.Minute))
+	}
+	return value, err
+}
+func (s trainingModifyStub) Delete(_ context.Context, id training.ID) error {
+	return s.state.record("training.delete", string(id))
+}
+
 func (s gameModifyStub) CreateMatchWith(_ context.Context, id game.MatchID, home, away team.ID, scheduled time.Time, location string, status game.MatchStatus) (game.Match, error) {
 	return game.NewMatch(id, home, away, scheduled, location, status, modifyTestNow)
 }
@@ -136,7 +160,7 @@ func (s rosterModifyStub) Leave(ctx context.Context, teamID team.ID, id roster.I
 func newTestTeamModifyTool(t *testing.T) (*modifyStub, tool.InvokableTool) {
 	t.Helper()
 	state := &modifyStub{}
-	modifyTool, err := NewTeamModify(state, playerModifyStub{state}, rosterModifyStub{state}, gameModifyStub{state}, WithTeamModifyIDGenerator(func() string { return "00000000-0000-0000-0000-000000000001" }))
+	modifyTool, err := NewTeamModify(state, playerModifyStub{state}, rosterModifyStub{state}, gameModifyStub{state}, trainingModifyStub{state}, WithTeamModifyIDGenerator(func() string { return "00000000-0000-0000-0000-000000000001" }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +178,7 @@ func TestTeamModifyDescribe(t *testing.T) {
 	if err := json.Unmarshal([]byte(rootJSON), &root); err != nil {
 		t.Fatal(err)
 	}
-	if len(root.Topics) != 6 || root.Topics[0].Name != "team" || len(root.Topics[1].Children) != 3 || len(root.Topics[2].Children) != 3 || len(root.Topics[3].Children) != 4 {
+	if len(root.Topics) != 7 || root.Topics[0].Name != "team" || len(root.Topics[1].Children) != 3 || len(root.Topics[2].Children) != 3 || len(root.Topics[3].Children) != 4 || len(root.Topics[6].Children) != 3 {
 		t.Fatalf("root=%#v", root)
 	}
 	leafJSON, err := modifyTool.InvokableRun(context.Background(), `{"mode":"describe","topics":["roster.assign","unknown","roster.assign"]}`)
@@ -181,6 +205,9 @@ func TestTeamModifyExecutesAllOperations(t *testing.T) {
 		{"roster.assign", `{"team_id":"00000000-0000-0000-0000-000000000002","player_id":"00000000-0000-0000-0000-000000000003","jersey_number":18,"joined_at":"2026-08-01"}`, "00000000-0000-0000-0000-000000000001"},
 		{"roster.change_jersey", `{"team_id":"00000000-0000-0000-0000-000000000002","membership_id":"00000000-0000-0000-0000-000000000004","jersey_number":19}`, "00000000-0000-0000-0000-000000000004"},
 		{"roster.leave", `{"team_id":"00000000-0000-0000-0000-000000000002","membership_id":"00000000-0000-0000-0000-000000000004","left_at":"2026-08-16"}`, "00000000-0000-0000-0000-000000000004"},
+		{"training.create", `{"player_id":"00000000-0000-0000-0000-000000000003","training_date":"2026-08-16","content":"打击训练"}`, "00000000-0000-0000-0000-000000000001"},
+		{"training.update", `{"training_id":"00000000-0000-0000-0000-000000000005","content":"守备训练","reflection":"稳定"}`, "00000000-0000-0000-0000-000000000005"},
+		{"training.delete", `{"training_id":"00000000-0000-0000-0000-000000000005"}`, "00000000-0000-0000-0000-000000000005"},
 	}
 	for _, test := range tests {
 		input := `{"mode":"execute","operation":"` + test.operation + `","arguments":` + test.arguments + `,"confirmed":true}`
@@ -317,7 +344,7 @@ func TestTeamModifyRejectsUnsafeOrInvalidInput(t *testing.T) {
 
 func TestNewTeamModifyRequiresDependencies(t *testing.T) {
 	t.Parallel()
-	if _, err := NewTeamModify(nil, nil, nil, nil); err == nil {
+	if _, err := NewTeamModify(nil, nil, nil, nil, nil); err == nil {
 		t.Fatal("nil services accepted")
 	}
 }

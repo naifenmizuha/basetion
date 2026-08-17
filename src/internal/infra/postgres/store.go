@@ -120,6 +120,7 @@ func (s *Store) WithinTransaction(ctx context.Context, fn func(domainroster.Repo
 		Teams:       &TeamRepository{db: tx},
 		Players:     &PlayerRepository{db: tx},
 		Memberships: &membershipRepository{db: tx},
+		Training:    &TrainingRepository{db: tx},
 	}
 	if err := fn(repositories); err != nil {
 		_ = tx.Rollback(ctx)
@@ -133,3 +134,6 @@ func (s *Store) WithinTransaction(ctx context.Context, fn func(domainroster.Repo
 
 func (s *Store) Players() *PlayerRepository { return &PlayerRepository{db: s.pool} }
 func (s *Store) Teams() *TeamRepository     { return &TeamRepository{db: s.pool} }
+func (s *Store) Training() *TrainingRepository {
+	return &TrainingRepository{db: s.pool}
+}

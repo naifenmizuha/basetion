@@ -31,10 +31,15 @@ type MembershipRepository interface {
 	SoftDeleteByPlayer(context.Context, player.ID, time.Time) error
 }
 
+type TrainingRepository interface {
+	SoftDeleteByPlayer(context.Context, player.ID, time.Time) error
+}
+
 type Repositories struct {
 	Teams       TeamRepository
 	Players     PlayerRepository
 	Memberships MembershipRepository
+	Training    TrainingRepository
 }
 
 type UnitOfWork interface {
@@ -205,6 +210,9 @@ func (s *Service) DeletePlayer(ctx context.Context, id player.ID) error {
 		}
 		now, expected := s.clock.Now(), value.Version()
 		if err := repos.Memberships.SoftDeleteByPlayer(ctx, id, now); err != nil {
+			return err
+		}
+		if err := repos.Training.SoftDeleteByPlayer(ctx, id, now); err != nil {
 			return err
 		}
 		if err := value.Delete(now); err != nil {

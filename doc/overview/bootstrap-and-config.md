@@ -20,6 +20,6 @@
 
 ## 组合根
 
-`bootstrap.Execute` 是具体实现的装配位置。它先从 CLI 提取 `--profile run|dev`（默认 run），再完成全局配置和中文语言初始化、文件 Session 存储、对应 profile 的 PostgreSQL 存储、球队/名单/比赛只读领域服务、Team Query Lua 执行器与领域服务、球队/球员/名单/比赛写领域服务、`team_query` 与 `team_modify` 工具、AgenticModel、Harness Runtime、会话服务和 CLI 调用。写领域服务共享系统时钟；工具层直接调用领域服务，不新增 application 模块。固定数据库只关闭连接池；临时数据库会创建随机后缀数据库、迁移并加载开发 fixture，进程结束时限时清理。
+`bootstrap.Execute` 是具体实现的装配位置。它先从 CLI 提取 `--profile run|dev`（默认 run），再完成全局配置和中文语言初始化、文件 Session 存储、对应 profile 的 PostgreSQL 存储、球队/名单/比赛/自训记录只读领域服务、Team Query Lua 执行器与领域服务、球队/球员/名单/比赛/自训记录写领域服务、`team_query` 与 `team_modify` 工具、AgenticModel、Harness Runtime、会话服务和 CLI 调用。写领域服务共享系统时钟；工具层直接调用领域服务，不新增 application 模块。固定数据库只关闭连接池；临时数据库会创建随机后缀数据库、迁移并加载开发 fixture，进程结束时限时清理。
 
 任一步初始化失败都会向 stderr 输出带阶段语义的错误并返回非零退出码。启动日志使用脱敏诊断字段；具体依赖关系不下沉到入口或领域模块。

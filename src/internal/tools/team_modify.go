@@ -17,6 +17,7 @@ import (
 	"github.com/naifenmizuha/basetion/src/internal/domain/player"
 	"github.com/naifenmizuha/basetion/src/internal/domain/roster"
 	"github.com/naifenmizuha/basetion/src/internal/domain/team"
+	"github.com/naifenmizuha/basetion/src/internal/domain/training"
 )
 
 const TeamModifyToolName = "team_modify"
@@ -47,6 +48,11 @@ type GameModifier interface {
 	CreatePlateWith(context.Context, game.PlateID, game.MatchID, int, int, game.Half, int, player.ID, player.ID, string, game.PlateType, string, [3]*player.ID, int, int) (game.Plate, error)
 	UpdatePlate(context.Context, game.PlateID, int, int, game.Half, int, player.ID, player.ID, string, game.PlateType, string, [3]*player.ID, int, int) (game.Plate, error)
 	DeletePlate(context.Context, game.PlateID) error
+}
+type TrainingModifier interface {
+	Create(context.Context, training.ID, player.ID, training.Date, string, string) (training.Record, error)
+	Update(context.Context, training.ID, string, string) (training.Record, error)
+	Delete(context.Context, training.ID) error
 }
 
 type IDGenerator func() string
@@ -139,12 +145,13 @@ type teamModifyHandler struct {
 	players    PlayerModifier
 	rosters    RosterModifier
 	games      GameModifier
+	training   TrainingModifier
 	newID      IDGenerator
 	operations map[string]modifyOperation
 }
 
-func NewTeamModify(teams TeamModifier, players PlayerModifier, rosters RosterModifier, games GameModifier, options ...TeamModifyOption) (tool.InvokableTool, error) {
-	if teams == nil || players == nil || rosters == nil || games == nil {
+func NewTeamModify(teams TeamModifier, players PlayerModifier, rosters RosterModifier, games GameModifier, trainingService TrainingModifier, options ...TeamModifyOption) (tool.InvokableTool, error) {
+	if teams == nil || players == nil || rosters == nil || games == nil || trainingService == nil {
 		return nil, errors.New("team modify services are required")
 	}
 	settings := teamModifyOptions{newID: uuid.NewString}
@@ -154,7 +161,7 @@ func NewTeamModify(teams TeamModifier, players PlayerModifier, rosters RosterMod
 	if settings.newID == nil {
 		return nil, errors.New("team modify id generator is required")
 	}
-	handler := &teamModifyHandler{teams: teams, players: players, rosters: rosters, games: games, newID: settings.newID, operations: defaultModifyOperations()}
+	handler := &teamModifyHandler{teams: teams, players: players, rosters: rosters, games: games, training: trainingService, newID: settings.newID, operations: defaultModifyOperations()}
 	return toolutils.InferTool(
 		TeamModifyToolName,
 		"发现并执行预定义的球队数据修改操作。先用 describe 一次加载所需操作及参数；获得用户对完整修改的明确确认后，才能用 execute 执行。多个修改通过 operations 一次提交，按数组顺序执行，遇错中止且不回滚，并返回失败位置、原因和未执行步骤。该工具不接受脚本或数据库语句。",
@@ -251,7 +258,7 @@ func (h *teamModifyHandler) executeBatch(ctx context.Context, requests []teamMod
 
 func (h *teamModifyHandler) describe(requested []string) []modifyTopicDescription {
 	if len(requested) == 0 {
-		groups := []string{"team", "player", "roster", "match", "lineup", "plate"}
+		groups := []string{"team", "player", "roster", "match", "lineup", "plate", "training"}
 		result := make([]modifyTopicDescription, 0, len(groups))
 		for _, group := range groups {
 			result = append(result, h.describeGroup(group))
@@ -266,7 +273,7 @@ func (h *teamModifyHandler) describe(requested []string) []modifyTopicDescriptio
 			continue
 		}
 		seen[name] = struct{}{}
-		if name == "team" || name == "player" || name == "roster" || name == "match" || name == "lineup" || name == "plate" {
+		if name == "team" || name == "player" || name == "roster" || name == "match" || name == "lineup" || name == "plate" || name == "training" {
 			result = append(result, h.describeGroup(name))
 			continue
 		}
@@ -295,7 +302,7 @@ func (h *teamModifyHandler) describeGroup(group string) modifyTopicDescription {
 	return modifyTopicDescription{Name: group, Kind: "group", Found: true, Summary: group + " 数据修改操作。", Children: children}
 }
 
-var modifyOperationOrder = []string{"team.create", "player.create", "player.update", "player.set_active", "roster.assign", "roster.change_jersey", "roster.leave", "match.create", "match.update", "match.set_status", "match.delete", "lineup.create", "lineup.replace", "lineup.delete", "plate.create", "plate.update", "plate.delete"}
+var modifyOperationOrder = []string{"team.create", "player.create", "player.update", "player.set_active", "roster.assign", "roster.change_jersey", "roster.leave", "match.create", "match.update", "match.set_status", "match.delete", "lineup.create", "lineup.replace", "lineup.delete", "plate.create", "plate.update", "plate.delete", "training.create", "training.update", "training.delete"}
 
 func defaultModifyOperations() map[string]modifyOperation {
 	hands := []string{"left", "right"}
@@ -324,6 +331,9 @@ func defaultModifyOperations() map[string]modifyOperation {
 		"plate.create":         {name: "plate.create", group: "plate", summary: "创建打席及赛后比分快照。", parameters: plateFields(true), resultType: "plate"},
 		"plate.update":         {name: "plate.update", group: "plate", summary: "更新打席及赛后比分快照。", parameters: plateFields(false), resultType: "plate"},
 		"plate.delete":         {name: "plate.delete", group: "plate", summary: "软删除打席。", parameters: []modifyFieldDescription{{Name: "plate_id", Type: "string", Required: true, Description: "打席 ID。"}}, resultType: "deleted"},
+		"training.create":      {name: "training.create", group: "training", summary: "创建球员每日自训记录。", parameters: []modifyFieldDescription{{Name: "player_id", Type: "string", Required: true, Description: "球员 ID。"}, {Name: "training_date", Type: "string", Required: true, Description: "训练日期，格式 YYYY-MM-DD。"}, {Name: "content", Type: "string", Required: true, Description: "训练内容。"}, {Name: "reflection", Type: "string", Required: false, Description: "训练感想。"}}, resultType: "training_record"},
+		"training.update":      {name: "training.update", group: "training", summary: "更新自训记录的内容与感想。", parameters: []modifyFieldDescription{{Name: "training_id", Type: "string", Required: true, Description: "自训记录 ID。"}, {Name: "content", Type: "string", Required: true, Description: "训练内容。"}, {Name: "reflection", Type: "string", Required: false, Description: "训练感想。"}}, resultType: "training_record"},
+		"training.delete":      {name: "training.delete", group: "training", summary: "软删除自训记录。", parameters: []modifyFieldDescription{{Name: "training_id", Type: "string", Required: true, Description: "自训记录 ID。"}}, resultType: "deleted"},
 	}
 }
 
@@ -359,6 +369,20 @@ type rosterLeaveArguments struct {
 	TeamID       string `json:"team_id"`
 	MembershipID string `json:"membership_id"`
 	LeftAt       string `json:"left_at"`
+}
+type trainingCreateArguments struct {
+	PlayerID     string `json:"player_id"`
+	TrainingDate string `json:"training_date"`
+	Content      string `json:"content"`
+	Reflection   string `json:"reflection"`
+}
+type trainingUpdateArguments struct {
+	TrainingID string `json:"training_id"`
+	Content    string `json:"content"`
+	Reflection string `json:"reflection"`
+}
+type trainingDeleteArguments struct {
+	TrainingID string `json:"training_id"`
 }
 
 func (h *teamModifyHandler) execute(ctx context.Context, operation string, arguments map[string]any) (any, error) {
@@ -458,6 +482,39 @@ func (h *teamModifyHandler) execute(ctx context.Context, operation string, argum
 			return nil, err
 		}
 		return membershipResult(value), nil
+	case "training.create":
+		var input trainingCreateArguments
+		if err := decodeArguments(arguments, &input); err != nil {
+			return nil, err
+		}
+		date, err := training.ParseDate(input.TrainingDate)
+		if err != nil {
+			return nil, fmt.Errorf("parse training_date: %w", err)
+		}
+		value, err := h.training.Create(ctx, training.ID(h.newID()), player.ID(input.PlayerID), date, input.Content, input.Reflection)
+		if err != nil {
+			return nil, err
+		}
+		return trainingResult(value), nil
+	case "training.update":
+		var input trainingUpdateArguments
+		if err := decodeArguments(arguments, &input); err != nil {
+			return nil, err
+		}
+		value, err := h.training.Update(ctx, training.ID(input.TrainingID), input.Content, input.Reflection)
+		if err != nil {
+			return nil, err
+		}
+		return trainingResult(value), nil
+	case "training.delete":
+		var input trainingDeleteArguments
+		if err := decodeArguments(arguments, &input); err != nil {
+			return nil, err
+		}
+		if err := h.training.Delete(ctx, training.ID(input.TrainingID)); err != nil {
+			return nil, err
+		}
+		return map[string]any{"training_id": input.TrainingID, "deleted": true}, nil
 	default:
 		return h.executeGame(ctx, operation, arguments)
 	}
@@ -536,6 +593,19 @@ func validateModifyArguments(operation string, arguments map[string]any) error {
 			return fmt.Errorf("parse left_at: %w", err)
 		}
 		return nil
+	case "training.create":
+		var input trainingCreateArguments
+		if err := decodeArguments(arguments, &input); err != nil {
+			return err
+		}
+		if _, err := training.ParseDate(input.TrainingDate); err != nil {
+			return fmt.Errorf("parse training_date: %w", err)
+		}
+		return nil
+	case "training.update":
+		return decodeArguments(arguments, &trainingUpdateArguments{})
+	case "training.delete":
+		return decodeArguments(arguments, &trainingDeleteArguments{})
 	default:
 		return validateGameArguments(operation, arguments)
 	}
@@ -605,4 +675,8 @@ func membershipResult(value roster.Membership) map[string]any {
 		result["left_at"] = nil
 	}
 	return result
+}
+
+func trainingResult(value training.Record) map[string]any {
+	return map[string]any{"id": value.ID(), "player_id": value.PlayerID(), "training_date": value.TrainingDate().String(), "content": value.Content(), "reflection": value.Reflection(), "version": value.Version(), "created_at": value.CreatedAt().Format(time.RFC3339Nano), "updated_at": value.UpdatedAt().Format(time.RFC3339Nano)}
 }

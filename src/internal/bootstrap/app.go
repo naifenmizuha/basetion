@@ -16,6 +16,7 @@ import (
 	"github.com/naifenmizuha/basetion/src/internal/domain/roster"
 	"github.com/naifenmizuha/basetion/src/internal/domain/team"
 	domainteamquery "github.com/naifenmizuha/basetion/src/internal/domain/teamquery"
+	"github.com/naifenmizuha/basetion/src/internal/domain/training"
 	"github.com/naifenmizuha/basetion/src/internal/entry/cli"
 	"github.com/naifenmizuha/basetion/src/internal/harness"
 	infrapostgres "github.com/naifenmizuha/basetion/src/internal/infra/postgres"
@@ -96,7 +97,12 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 		fmt.Fprintf(stderr, "初始化比赛读取服务失败: %v\n", err)
 		return 1
 	}
-	teamQueryExecutor, err := infrateamquery.NewLuaExecutor(infrateamquery.DefaultLimits(), infrateamquery.WithRosterServices(teamReadService, rosterReadService), infrateamquery.WithGameService(gameReadService))
+	trainingReadService, err := training.NewQueryService(database.Store.Training())
+	if err != nil {
+		fmt.Fprintf(stderr, "初始化自训记录读取服务失败: %v\n", err)
+		return 1
+	}
+	teamQueryExecutor, err := infrateamquery.NewLuaExecutor(infrateamquery.DefaultLimits(), infrateamquery.WithRosterServices(teamReadService, rosterReadService), infrateamquery.WithGameService(gameReadService), infrateamquery.WithTrainingService(trainingReadService))
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化球队查询 Lua 执行器失败: %v\n", err)
 		return 1
@@ -132,7 +138,12 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 		fmt.Fprintf(stderr, "初始化比赛写入服务失败: %v\n", err)
 		return 1
 	}
-	teamModifyTool, err := basetiontools.NewTeamModify(teamService, playerService, rosterService, gameService)
+	trainingService, err := training.NewService(database.Store.Training(), database.Store.Players(), clock)
+	if err != nil {
+		fmt.Fprintf(stderr, "初始化自训记录写入服务失败: %v\n", err)
+		return 1
+	}
+	teamModifyTool, err := basetiontools.NewTeamModify(teamService, playerService, rosterService, gameService, trainingService)
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化球队修改工具失败: %v\n", err)
 		return 1

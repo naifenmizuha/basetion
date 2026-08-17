@@ -11,3 +11,9 @@ player-add:
 
 game:
     cd {{justfile_directory()}} && GOTOOLCHAIN=auto go run ./src/cmd/basetion --profile dev "最近蜀汉队和曹魏队的比赛结果咋样，有啥亮眼表现吗？"
+
+training:
+    cd {{justfile_directory()}} && GOTOOLCHAIN=auto go run ./src/cmd/basetion --profile dev "分析一下最近3天曹魏队队员的训练内容，看看有谁在偷懒"
+
+training-mod:
+    cd {{justfile_directory()}} && GOTOOLCHAIN=auto go run ./src/cmd/basetion --profile dev "我是刘备，我今天(8月18日)投球了150个，感觉投完手有点痛，记一下，自动确认"
