@@ -15,7 +15,7 @@ description: "使用 Basetion 的球队查询与修改能力读取结构化事�
 - `roster.players`：按球队读取球员、名单关系和球员 ID。
 - `game.matches`：按球队、日期或状态筛选比赛。
 - `game.match`：读取单场比赛。
-- `game.plates`：读取单场比赛的打席事件。
+- `game.plays`：一次读取单场比赛的完整过程，包括逐球、跑垒和守备结果。
 - `game.score`：读取单场比赛的当前或最终比分。
 - `lineup.list`：读取单场比赛的阵容。
 - `training.records`：按球员和日期范围读取每日自训记录。
@@ -103,13 +103,13 @@ function main(team)
   end
 
   local events = {}
-  for _, plate in ipairs(team.game.plates({match_id = match.id})) do
+  for _, play in ipairs(team.game.plays({match_id = match.id})) do
     events[#events + 1] = {
-      sequence = plate.sequence,
-      inning = plate.inning,
-      half = plate.half,
-      batter = player_name[plate.batter_id],
-      result = plate.result_description,
+      sequence = play.sequence,
+      inning = play.inning,
+      half = play.half,
+      batter = player_name[play.batter_id],
+      result = play.result_description,
     }
   end
 
@@ -126,7 +126,6 @@ end
 - `roster.assign`、`roster.change_jersey`、`roster.leave`：入队、改号或离队。
 - `match.create`、`match.update`、`match.set_status`、`match.delete`：创建、更新、修改状态或软删除比赛。
 - `lineup.create`、`lineup.replace`、`lineup.delete`：创建、替换或软删除阵容。
-- `plate.create`、`plate.update`、`plate.delete`：创建、更新或软删除打席。
 - `training.create`、`training.update`、`training.delete`：创建、更新或软删除自训记录。
 
 ### 编排与确认

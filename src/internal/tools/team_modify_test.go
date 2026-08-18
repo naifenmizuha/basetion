@@ -127,13 +127,6 @@ func (s gameModifyStub) ReplaceLineupWith(ctx context.Context, matchID game.Matc
 func (s gameModifyStub) DeleteLineup(context.Context, game.MatchID, team.ID, game.LineupKind, uint16) error {
 	return nil
 }
-func (s gameModifyStub) CreatePlateWith(_ context.Context, id game.PlateID, matchID game.MatchID, sequence, inning int, half game.Half, order int, batter, pitcher player.ID, pitches string, kind game.PlateType, description string, runners [3]*player.ID, home, away int) (game.Plate, error) {
-	return game.NewPlate(id, matchID, sequence, inning, half, order, batter, pitcher, pitches, kind, description, runners, home, away, modifyTestNow)
-}
-func (s gameModifyStub) UpdatePlate(ctx context.Context, id game.PlateID, sequence, inning int, half game.Half, order int, batter, pitcher player.ID, pitches string, kind game.PlateType, description string, runners [3]*player.ID, home, away int) (game.Plate, error) {
-	return s.CreatePlateWith(ctx, id, "match", sequence, inning, half, order, batter, pitcher, pitches, kind, description, runners, home, away)
-}
-func (s gameModifyStub) DeletePlate(context.Context, game.PlateID) error { return nil }
 func (s rosterModifyStub) ChangeJersey(ctx context.Context, teamID team.ID, id roster.ID, jersey int) (roster.Membership, error) {
 	if err := s.state.record("roster.change_jersey", string(id)); err != nil {
 		return roster.Membership{}, err
@@ -178,7 +171,7 @@ func TestTeamModifyDescribe(t *testing.T) {
 	if err := json.Unmarshal([]byte(rootJSON), &root); err != nil {
 		t.Fatal(err)
 	}
-	if len(root.Topics) != 7 || root.Topics[0].Name != "team" || len(root.Topics[1].Children) != 3 || len(root.Topics[2].Children) != 3 || len(root.Topics[3].Children) != 4 || len(root.Topics[6].Children) != 3 {
+	if len(root.Topics) != 6 || root.Topics[0].Name != "team" || len(root.Topics[1].Children) != 3 || len(root.Topics[2].Children) != 3 || len(root.Topics[3].Children) != 4 || len(root.Topics[5].Children) != 3 {
 		t.Fatalf("root=%#v", root)
 	}
 	leafJSON, err := modifyTool.InvokableRun(context.Background(), `{"mode":"describe","topics":["roster.assign","unknown","roster.assign"]}`)
@@ -228,16 +221,11 @@ func TestTeamModifyExecutesGameOperations(t *testing.T) {
 		`{"mode":"execute","operation":"match.create","arguments":{"home_team_id":"home","away_team_id":"away","scheduled_at":"2026-08-18T19:00:00Z","location":"Field","status":"scheduled"},"confirmed":true}`,
 		`{"mode":"execute","operation":"match.set_status","arguments":{"match_id":"match","status":"final"},"confirmed":true}`,
 		`{"mode":"execute","operation":"lineup.create","arguments":{"match_id":"match","team_id":"away","kind":"starter","variant_number":0,"variant_name":"Starter","entries":[{"player_id":"batter","batting_order":1,"position":"pitcher"}]},"confirmed":true}`,
-		`{"mode":"execute","operation":"plate.create","arguments":{"match_id":"match","sequence":1,"inning":1,"half":"top","batting_order":1,"batter_id":"batter","pitcher_id":"pitcher","pitch_sequence":"S","plate_type":"home_run","result_description":"Home run","home_score":0,"away_score":1},"confirmed":true}`,
 	}
 	for _, input := range inputs {
 		if _, err := modifyTool.InvokableRun(context.Background(), input); err != nil {
 			t.Fatalf("input=%s err=%v", input, err)
 		}
-	}
-	bad := `{"mode":"execute","operation":"plate.create","arguments":{"match_id":"match","sequence":1,"inning":1,"half":"top","batting_order":1,"batter_id":"batter","pitcher_id":"pitcher","pitch_sequence":"S","plate_type":"out","result_description":"Out","home_score":-1,"away_score":0},"confirmed":true}`
-	if _, err := modifyTool.InvokableRun(context.Background(), bad); err == nil {
-		t.Fatal("negative score accepted")
 	}
 }
 

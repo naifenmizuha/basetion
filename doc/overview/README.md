@@ -33,7 +33,7 @@ src/cmd/basetion
 - [`harness.md`](harness.md)：AgenticModel、Skill Middleware、Eino Agent/Runner 和生命周期回调。
 - [`tools.md`](tools.md)：模型工具协议适配。
 - [`roster-domain.md`](roster-domain.md)：球员、球队、名单实体、领域服务和事务端口。
-- [`game-domain.md`](game-domain.md)：比赛、阵容、打席、比分快照及读写领域服务。
+- [`game-domain.md`](game-domain.md)：比赛、阵容、比赛过程（Play）及读写领域服务。
 - [`training-domain.md`](training-domain.md)：球员每日自训记录、日期值对象及读写领域服务。
 - [`teamquery-domain.md`](teamquery-domain.md)：可编程只读球队查询契约与能力目录。
 - [`infrastructure.md`](infrastructure.md)：Session 文件存储、PostgreSQL 存储与 Lua 查询运行时。
@@ -53,4 +53,4 @@ src/cmd/basetion
 - 项目知识和球队管理规范由仓库根目录的两个必需 Skill 按需加载；当前不提供通用文件读取或生产知识检索。
 - 业务 Session 使用本地 JSON 快照；Eino Checkpoint 尚未启用。
 - 模型使用兼容 OpenAI Responses API 的 Eino `AgenticModel` 实现。
-- `team_query` 当前接入只读 `roster`、`game`、`lineup` 和 `training` 模块；`team_modify` 支持球队、球员、名单、比赛、阵容、打席和自训记录的预定义操作。分析查询模块仍为不可用占位。
+- `team_query` 当前接入只读 `roster`、`game`、`lineup` 和 `training` 模块；`team_modify` 支持球队、球员、名单、比赛、阵容和自训记录的预定义操作。分析查询模块仍为不可用占位。

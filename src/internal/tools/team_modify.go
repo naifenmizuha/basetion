@@ -45,9 +45,6 @@ type GameModifier interface {
 	CreateLineupWith(context.Context, game.MatchID, team.ID, game.LineupKind, int, string, []game.LineupEntry) (game.Lineup, error)
 	ReplaceLineupWith(context.Context, game.MatchID, team.ID, game.LineupKind, int, string, []game.LineupEntry) (game.Lineup, error)
 	DeleteLineup(context.Context, game.MatchID, team.ID, game.LineupKind, uint16) error
-	CreatePlateWith(context.Context, game.PlateID, game.MatchID, int, int, game.Half, int, player.ID, player.ID, string, game.PlateType, string, [3]*player.ID, int, int) (game.Plate, error)
-	UpdatePlate(context.Context, game.PlateID, int, int, game.Half, int, player.ID, player.ID, string, game.PlateType, string, [3]*player.ID, int, int) (game.Plate, error)
-	DeletePlate(context.Context, game.PlateID) error
 }
 type TrainingModifier interface {
 	Create(context.Context, training.ID, player.ID, training.Date, string, string) (training.Record, error)
@@ -258,7 +255,7 @@ func (h *teamModifyHandler) executeBatch(ctx context.Context, requests []teamMod
 
 func (h *teamModifyHandler) describe(requested []string) []modifyTopicDescription {
 	if len(requested) == 0 {
-		groups := []string{"team", "player", "roster", "match", "lineup", "plate", "training"}
+		groups := []string{"team", "player", "roster", "match", "lineup", "training"}
 		result := make([]modifyTopicDescription, 0, len(groups))
 		for _, group := range groups {
 			result = append(result, h.describeGroup(group))
@@ -273,7 +270,7 @@ func (h *teamModifyHandler) describe(requested []string) []modifyTopicDescriptio
 			continue
 		}
 		seen[name] = struct{}{}
-		if name == "team" || name == "player" || name == "roster" || name == "match" || name == "lineup" || name == "plate" || name == "training" {
+		if name == "team" || name == "player" || name == "roster" || name == "match" || name == "lineup" || name == "training" {
 			result = append(result, h.describeGroup(name))
 			continue
 		}
@@ -302,7 +299,7 @@ func (h *teamModifyHandler) describeGroup(group string) modifyTopicDescription {
 	return modifyTopicDescription{Name: group, Kind: "group", Found: true, Summary: group + " 数据修改操作。", Children: children}
 }
 
-var modifyOperationOrder = []string{"team.create", "player.create", "player.update", "player.set_active", "roster.assign", "roster.change_jersey", "roster.leave", "match.create", "match.update", "match.set_status", "match.delete", "lineup.create", "lineup.replace", "lineup.delete", "plate.create", "plate.update", "plate.delete", "training.create", "training.update", "training.delete"}
+var modifyOperationOrder = []string{"team.create", "player.create", "player.update", "player.set_active", "roster.assign", "roster.change_jersey", "roster.leave", "match.create", "match.update", "match.set_status", "match.delete", "lineup.create", "lineup.replace", "lineup.delete", "training.create", "training.update", "training.delete"}
 
 func defaultModifyOperations() map[string]modifyOperation {
 	hands := []string{"left", "right"}
@@ -324,13 +321,10 @@ func defaultModifyOperations() map[string]modifyOperation {
 		"match.create":         {name: "match.create", group: "match", summary: "创建比赛。", parameters: matchCreateFields(), resultType: "match"},
 		"match.update":         {name: "match.update", group: "match", summary: "更新比赛安排。", parameters: append([]modifyFieldDescription{{Name: "match_id", Type: "string", Required: true, Description: "比赛 ID。"}}, matchBaseFields()...), resultType: "match"},
 		"match.set_status":     {name: "match.set_status", group: "match", summary: "设置比赛状态。", parameters: []modifyFieldDescription{{Name: "match_id", Type: "string", Required: true, Description: "比赛 ID。"}, {Name: "status", Type: "string", Required: true, Description: "比赛状态。", Values: []string{"scheduled", "in_progress", "final", "cancelled"}}}, resultType: "match"},
-		"match.delete":         {name: "match.delete", group: "match", summary: "软删除比赛及关联阵容和打席。", parameters: []modifyFieldDescription{{Name: "match_id", Type: "string", Required: true, Description: "比赛 ID。"}}, resultType: "deleted"},
+		"match.delete":         {name: "match.delete", group: "match", summary: "软删除比赛及关联阵容和比赛过程。", parameters: []modifyFieldDescription{{Name: "match_id", Type: "string", Required: true, Description: "比赛 ID。"}}, resultType: "deleted"},
 		"lineup.create":        {name: "lineup.create", group: "lineup", summary: "创建比赛阵容。", parameters: lineupFields(), resultType: "lineup"},
 		"lineup.replace":       {name: "lineup.replace", group: "lineup", summary: "替换比赛阵容。", parameters: lineupFields(), resultType: "lineup"},
 		"lineup.delete":        {name: "lineup.delete", group: "lineup", summary: "软删除比赛阵容。", parameters: lineupKeyFields(), resultType: "deleted"},
-		"plate.create":         {name: "plate.create", group: "plate", summary: "创建打席及赛后比分快照。", parameters: plateFields(true), resultType: "plate"},
-		"plate.update":         {name: "plate.update", group: "plate", summary: "更新打席及赛后比分快照。", parameters: plateFields(false), resultType: "plate"},
-		"plate.delete":         {name: "plate.delete", group: "plate", summary: "软删除打席。", parameters: []modifyFieldDescription{{Name: "plate_id", Type: "string", Required: true, Description: "打席 ID。"}}, resultType: "deleted"},
 		"training.create":      {name: "training.create", group: "training", summary: "创建球员每日自训记录。", parameters: []modifyFieldDescription{{Name: "player_id", Type: "string", Required: true, Description: "球员 ID。"}, {Name: "training_date", Type: "string", Required: true, Description: "训练日期，格式 YYYY-MM-DD。"}, {Name: "content", Type: "string", Required: true, Description: "训练内容。"}, {Name: "reflection", Type: "string", Required: false, Description: "训练感想。"}}, resultType: "training_record"},
 		"training.update":      {name: "training.update", group: "training", summary: "更新自训记录的内容与感想。", parameters: []modifyFieldDescription{{Name: "training_id", Type: "string", Required: true, Description: "自训记录 ID。"}, {Name: "content", Type: "string", Required: true, Description: "训练内容。"}, {Name: "reflection", Type: "string", Required: false, Description: "训练感想。"}}, resultType: "training_record"},
 		"training.delete":      {name: "training.delete", group: "training", summary: "软删除自训记录。", parameters: []modifyFieldDescription{{Name: "training_id", Type: "string", Required: true, Description: "自训记录 ID。"}}, resultType: "deleted"},

@@ -18,7 +18,7 @@ type QueryRepository interface {
 	ListMatches(context.Context) ([]Match, error)
 	GetMatch(context.Context, MatchID) (Match, error)
 	ListLineups(context.Context, MatchID) ([]Lineup, error)
-	ListPlates(context.Context, MatchID) ([]Plate, error)
+	ListPlays(context.Context, MatchID) ([]Play, error)
 }
 
 type QueryService struct{ repository QueryRepository }
@@ -60,19 +60,27 @@ func (s *QueryService) GetMatch(ctx context.Context, id MatchID) (Match, error) 
 	return s.repository.GetMatch(ctx, id)
 }
 func (s *QueryService) GetDetail(ctx context.Context, id MatchID) (Detail, error) {
-	m, err := s.repository.GetMatch(ctx, id)
+	record, err := s.GetGameRecord(ctx, id)
 	if err != nil {
 		return Detail{}, err
+	}
+	return Detail{Match: record.Match, Lineups: record.Lineups, Plays: record.Plays}, nil
+}
+
+func (s *QueryService) GetGameRecord(ctx context.Context, id MatchID) (GameRecord, error) {
+	m, err := s.repository.GetMatch(ctx, id)
+	if err != nil {
+		return GameRecord{}, err
 	}
 	ls, err := s.repository.ListLineups(ctx, id)
 	if err != nil {
-		return Detail{}, err
+		return GameRecord{}, err
 	}
-	ps, err := s.repository.ListPlates(ctx, id)
+	ps, err := s.repository.ListPlays(ctx, id)
 	if err != nil {
-		return Detail{}, err
+		return GameRecord{}, err
 	}
-	return Detail{Match: m, Lineups: ls, Plates: ps}, nil
+	return GameRecord{Match: m, Lineups: ls, Plays: ps}, nil
 }
 func (s *QueryService) ListLineups(ctx context.Context, id MatchID, teamID team.ID) ([]Lineup, error) {
 	values, err := s.repository.ListLineups(ctx, id)
@@ -90,8 +98,8 @@ func (s *QueryService) ListLineups(ctx context.Context, id MatchID, teamID team.
 	}
 	return result, nil
 }
-func (s *QueryService) ListPlates(ctx context.Context, id MatchID) ([]Plate, error) {
-	return s.repository.ListPlates(ctx, id)
+func (s *QueryService) ListPlays(ctx context.Context, id MatchID) ([]Play, error) {
+	return s.repository.ListPlays(ctx, id)
 }
 
 type ScoreSnapshot struct {
@@ -104,15 +112,16 @@ func (s *QueryService) CurrentScore(ctx context.Context, id MatchID) (ScoreSnaps
 	if err != nil {
 		return ScoreSnapshot{}, err
 	}
-	plates, err := s.repository.ListPlates(ctx, id)
+	plays, err := s.repository.ListPlays(ctx, id)
 	if err != nil {
 		return ScoreSnapshot{}, err
 	}
 	var score *Score
 	var latest uint32
-	for _, plate := range plates {
-		if plate.Sequence() >= latest {
-			latest, score = plate.Sequence(), plate.Score()
+	for _, play := range plays {
+		if play.Sequence() >= latest {
+			after := play.After()
+			latest, score = play.Sequence(), &Score{Home: after.HomeScore, Away: after.AwayScore}
 		}
 	}
 	return ScoreSnapshot{Score: score, Final: m.Status() == MatchFinal}, nil

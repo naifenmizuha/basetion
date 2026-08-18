@@ -313,15 +313,14 @@ func defaultTopics() map[string]topic {
 		{Name: "active", Type: "boolean", Required: true, Description: "该名单记录当前是否有效。"},
 	}
 	matchFields := []TopicFieldDescription{{Name: "id", Type: "string", Required: true, Description: "比赛 ID。"}, {Name: "home_team_id", Type: "string", Required: true, Description: "主队 ID。"}, {Name: "away_team_id", Type: "string", Required: true, Description: "客队 ID。"}, {Name: "scheduled_at", Type: "string", Required: true, Description: "RFC3339 比赛时间。"}, {Name: "location", Type: "string", Required: true, Description: "比赛地点。"}, {Name: "status", Type: "string", Required: true, Description: "比赛状态。", Values: []string{"scheduled", "in_progress", "final", "cancelled"}}}
-	plateFields := []TopicFieldDescription{
-		{Name: "id", Type: "string", Required: true, Description: "打席 ID。"}, {Name: "match_id", Type: "string", Required: true, Description: "比赛 ID。"},
+	playFields := []TopicFieldDescription{
+		{Name: "id", Type: "string", Required: true, Description: "比赛过程 ID。"}, {Name: "match_id", Type: "string", Required: true, Description: "比赛 ID。"},
 		{Name: "sequence", Type: "number", Required: true, Description: "比赛内事件顺序。"}, {Name: "inning", Type: "number", Required: true, Description: "局数。"},
 		{Name: "half", Type: "string", Required: true, Description: "上下半局。", Values: []string{"top", "bottom"}}, {Name: "batting_order", Type: "number", Required: true, Description: "棒次。"},
-		{Name: "batter_id", Type: "string", Required: true, Description: "打者 ID。"}, {Name: "pitcher_id", Type: "string", Required: true, Description: "投手 ID。"},
-		{Name: "pitch_sequence", Type: "string", Required: true, Description: "B/S/F 投球序列。"}, {Name: "plate_type", Type: "string", Required: true, Description: "打席结果类型。"},
-		{Name: "result_description", Type: "string", Required: true, Description: "打席结果说明。"},
-		{Name: "runner_on_first_id", Type: "string|null", Required: true, Description: "打席后的1垒跑者。"}, {Name: "runner_on_second_id", Type: "string|null", Required: true, Description: "打席后的2垒跑者。"}, {Name: "runner_on_third_id", Type: "string|null", Required: true, Description: "打席后的3垒跑者。"},
-		{Name: "home_score", Type: "number|null", Required: true, Description: "打席后的主队累计比分；旧数据可能为空。"}, {Name: "away_score", Type: "number|null", Required: true, Description: "打席后的客队累计比分；旧数据可能为空。"},
+		{Name: "batter_id", Type: "string", Required: true, Description: "打者 ID。"}, {Name: "starting_pitcher_id", Type: "string", Required: true, Description: "开局投手 ID。"},
+		{Name: "batting_result", Type: "string", Required: true, Description: "结构化打击结果。"}, {Name: "pitches", Type: "array<pitch>", Required: true, Description: "逐球记录。"},
+		{Name: "runner_results", Type: "array<runner_result>", Required: true, Description: "跑者结果。"}, {Name: "fielding_results", Type: "array<fielding_result>", Required: true, Description: "守备结果。"},
+		{Name: "before", Type: "situation", Required: true, Description: "打席前局面。"}, {Name: "after", Type: "situation", Required: true, Description: "打席后局面。"},
 	}
 	return map[string]topic{
 		"runtime": {
@@ -375,11 +374,11 @@ end`,
 			name:            "game",
 			kind:            "module",
 			summary:         "比赛、比分与比赛事件读取。",
-			requiresModules: []string{"game"}, children: []string{"game.matches", "game.match", "game.plates", "game.score"},
+			requiresModules: []string{"game"}, children: []string{"game.matches", "game.match", "game.plays", "game.score"},
 		},
 		"game.matches": {name: "game.matches", kind: "command", summary: "按球队、时间和状态筛选比赛。", requiresModules: []string{"game"}, call: "team.game.matches({team_id=..., date_from=..., date_to=..., status=...})", parameters: []TopicFieldDescription{{Name: "team_id", Type: "string", Required: false, Description: "主队或客队 ID。"}, {Name: "date_from", Type: "string", Required: false, Description: "YYYY-MM-DD 或 RFC3339 下界。"}, {Name: "date_to", Type: "string", Required: false, Description: "YYYY-MM-DD 或 RFC3339 上界。"}, {Name: "status", Type: "string", Required: false, Description: "比赛状态。", Values: []string{"scheduled", "in_progress", "final", "cancelled"}}}, resultType: "array<match>", returns: matchFields, example: `function main(team) return team.game.matches({team_id="team-1", status="final"}) end`},
 		"game.match":   {name: "game.match", kind: "command", summary: "按 ID 获取比赛。", requiresModules: []string{"game"}, call: "team.game.match({match_id=...})", parameters: []TopicFieldDescription{{Name: "match_id", Type: "string", Required: true, Description: "比赛 ID。"}}, resultType: "match", returns: matchFields, example: `function main(team) return team.game.match({match_id="match-1"}) end`},
-		"game.plates":  {name: "game.plates", kind: "command", summary: "按顺序读取比赛打席及比分快照。", requiresModules: []string{"game"}, call: "team.game.plates({match_id=...})", parameters: []TopicFieldDescription{{Name: "match_id", Type: "string", Required: true, Description: "比赛 ID。"}}, resultType: "array<plate>", returns: plateFields, example: `function main(team) return team.game.plates({match_id="match-1"}) end`},
+		"game.plays":   {name: "game.plays", kind: "command", summary: "一次读取整场比赛的完整过程。", requiresModules: []string{"game"}, call: "team.game.plays({match_id=...})", parameters: []TopicFieldDescription{{Name: "match_id", Type: "string", Required: true, Description: "比赛 ID。"}}, resultType: "array<play>", returns: playFields, example: `function main(team) return team.game.plays({match_id="match-1"}) end`},
 		"game.score":   {name: "game.score", kind: "command", summary: "读取最后一个打席记录的当前或最终比分。", requiresModules: []string{"game"}, call: "team.game.score({match_id=...})", parameters: []TopicFieldDescription{{Name: "match_id", Type: "string", Required: true, Description: "比赛 ID。"}}, resultType: "score", returns: []TopicFieldDescription{{Name: "known", Type: "boolean", Required: true, Description: "最后一条打席是否包含比分。"}, {Name: "final", Type: "boolean", Required: true, Description: "比赛状态是否为 final。"}, {Name: "home_score", Type: "number|null", Required: true, Description: "主队比分。"}, {Name: "away_score", Type: "number|null", Required: true, Description: "客队比分。"}}, example: `function main(team) return team.game.score({match_id="match-1"}) end`},
 		"lineup": {
 			name:            "lineup",

@@ -194,17 +194,17 @@ func TestPostgresDevelopmentFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(detail.Lineups) != 4 || len(detail.Plates) != 65 {
+	if len(detail.Lineups) != 4 || len(detail.Plays) != 1 {
 		t.Fatalf("game detail=%#v", detail)
 	}
 	if detail.Match.Status() != game.MatchFinal {
 		t.Fatalf("match status=%v", detail.Match.Status())
 	}
-	lastPlate := detail.Plates[len(detail.Plates)-1]
-	if lastPlate.Inning() != 9 || lastPlate.Half() != game.Bottom {
-		t.Fatalf("last fixture plate=%#v", lastPlate)
+	lastPlay := detail.Plays[len(detail.Plays)-1]
+	if lastPlay.Inning() != 9 || lastPlay.Half() != game.Bottom {
+		t.Fatalf("last fixture play=%#v", lastPlay)
 	}
-	if score := lastPlate.Score(); score == nil || score.Home != 5 || score.Away != 4 {
+	if score := lastPlay.After(); score.HomeScore != 5 || score.AwayScore != 4 {
 		t.Fatalf("fixture score=%#v", score)
 	}
 }
@@ -393,15 +393,18 @@ func TestPostgresGameCRUDAndExplicitSoftDelete(t *testing.T) {
 	if err = service.CreateLineup(ctx, lineup); err != nil {
 		t.Fatal(err)
 	}
-	plate, _ := game.NewPlate("00000000-0000-0000-0000-000000000141", match.ID(), 1, 1, game.Top, 1, players[0], players[1], "BSSBF", game.PlateSingle, "Single", [3]*player.ID{}, 0, 0, now)
-	if err = service.CreatePlate(ctx, plate); err != nil {
+	before, _ := game.NewSituation(0, 0, 0, [3]*player.ID{})
+	after, _ := game.NewSituation(1, 0, 0, [3]*player.ID{})
+	pitch, _ := game.NewPitch("00000000-0000-0000-0000-000000000151", 1, players[1], players[0], game.PitchInPlay, 0, 0, 0, 0, "", nil, nil, "in play", now)
+	play, _ := game.NewPlay(game.PlayDraft{ID: "00000000-0000-0000-0000-000000000141", MatchID: match.ID(), Sequence: 1, Inning: 1, Half: game.Top, BattingOrder: 1, BatterID: players[0], StartingPitcherID: players[1], Before: before, After: after, BattingResult: game.BattingGroundOut, ResultDescription: "Ground out", Pitches: []game.Pitch{pitch}}, now)
+	if err = service.CreatePlay(ctx, play); err != nil {
 		t.Fatal(err)
 	}
 	detail, err := store.GameDetail(ctx, match.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(detail.Lineups) != 1 || len(detail.Plates) != 1 {
+	if len(detail.Lineups) != 1 || len(detail.Plays) != 1 {
 		t.Fatalf("detail=%#v", detail)
 	}
 	clock.now = now.Add(2 * time.Hour)
@@ -412,7 +415,7 @@ func TestPostgresGameCRUDAndExplicitSoftDelete(t *testing.T) {
 	if _, err = store.Matches().Get(ctx, match.ID()); !errors.Is(err, game.ErrMatchNotFound) {
 		t.Fatalf("deleted match error=%v", err)
 	}
-	for table, want := range map[string]int{"matches": 1, "lineups": 1, "plates": 1} {
+	for table, want := range map[string]int{"matches": 1, "lineups": 1, "plays": 1, "pitches": 1} {
 		var got int
 		if err = store.pool.QueryRow(ctx, `SELECT count(*) FROM `+table+` WHERE deleted_at IS NOT NULL`).Scan(&got); err != nil {
 			t.Fatal(err)

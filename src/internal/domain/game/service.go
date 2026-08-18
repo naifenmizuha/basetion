@@ -26,13 +26,14 @@ type LineupRepository interface {
 	ListByMatch(context.Context, MatchID) ([]Lineup, error)
 	NameOccupied(context.Context, MatchID, team.ID, string, LineupKind, uint16) (bool, error)
 }
-type PlateRepository interface {
-	Create(context.Context, Plate) error
-	Get(context.Context, PlateID) (Plate, error)
-	GetForUpdate(context.Context, PlateID) (Plate, error)
-	Update(context.Context, Plate, uint64) error
+type PlayRepository interface {
+	Create(context.Context, Play) error
+	Get(context.Context, PlayID) (Play, error)
+	GetForUpdate(context.Context, PlayID) (Play, error)
+	Replace(context.Context, Play, uint64, time.Time) error
+	SoftDelete(context.Context, PlayID, uint64, time.Time) error
 	SoftDeleteByMatch(context.Context, MatchID, time.Time) error
-	ListByMatch(context.Context, MatchID) ([]Plate, error)
+	ListByMatch(context.Context, MatchID) ([]Play, error)
 }
 type TeamRepository interface {
 	GetForUpdate(context.Context, team.ID) (team.Team, error)
@@ -43,7 +44,7 @@ type PlayerRepository interface {
 type Repositories struct {
 	Matches MatchRepository
 	Lineups LineupRepository
-	Plates  PlateRepository
+	Plays   PlayRepository
 	Teams   TeamRepository
 	Players PlayerRepository
 }
@@ -138,7 +139,7 @@ func (s *Service) DeleteMatch(ctx context.Context, id MatchID) error {
 			return e
 		}
 		now, expected := s.clock.Now(), v.Version()
-		if e = r.Plates.SoftDeleteByMatch(ctx, id, now); e != nil {
+		if e = r.Plays.SoftDeleteByMatch(ctx, id, now); e != nil {
 			return e
 		}
 		if e = r.Lineups.SoftDeleteByMatch(ctx, id, now); e != nil {
@@ -222,57 +223,104 @@ func (s *Service) DeleteLineup(ctx context.Context, matchID MatchID, teamID team
 	})
 }
 
-func (s *Service) CreatePlate(ctx context.Context, value Plate) error {
+func (s *Service) CreatePlay(ctx context.Context, value Play) error {
 	return s.uow.WithinGameTransaction(ctx, func(r Repositories) error {
-		if e := validatePlateReferences(ctx, r, value); e != nil {
+		if e := validatePlayReferences(ctx, r, value); e != nil {
 			return e
 		}
-		return r.Plates.Create(ctx, value)
-	})
-}
-func (s *Service) CreatePlateWith(ctx context.Context, id PlateID, matchID MatchID, sequence, inning int, half Half, order int, batter, pitcher player.ID, pitches string, kind PlateType, description string, runners [3]*player.ID, homeScore, awayScore int) (Plate, error) {
-	value, err := NewPlate(id, matchID, sequence, inning, half, order, batter, pitcher, pitches, kind, description, runners, homeScore, awayScore, s.clock.Now())
-	if err != nil {
-		return Plate{}, err
-	}
-	if err := s.CreatePlate(ctx, value); err != nil {
-		return Plate{}, err
-	}
-	return value, nil
-}
-func (s *Service) UpdatePlate(ctx context.Context, id PlateID, sequence, inning int, half Half, order int, batter, pitcher player.ID, pitches string, kind PlateType, description string, runners [3]*player.ID, homeScore, awayScore int) (Plate, error) {
-	var result Plate
-	e := s.uow.WithinGameTransaction(ctx, func(r Repositories) error {
-		v, e := r.Plates.GetForUpdate(ctx, id)
+		plays, e := r.Plays.ListByMatch(ctx, value.MatchID())
 		if e != nil {
 			return e
 		}
-		expected := v.Version()
-		if e = v.Update(sequence, inning, half, order, batter, pitcher, pitches, kind, description, runners, homeScore, awayScore, s.clock.Now()); e != nil {
+		if e = validatePlayNeighbors(value, plays, ""); e != nil {
 			return e
 		}
-		if e = validatePlateReferences(ctx, r, v); e != nil {
+		return r.Plays.Create(ctx, value)
+	})
+}
+func (s *Service) ReplacePlay(ctx context.Context, id PlayID, expectedVersion uint64, draft PlayDraft) (Play, error) {
+	var result Play
+	e := s.uow.WithinGameTransaction(ctx, func(r Repositories) error {
+		current, e := r.Plays.GetForUpdate(ctx, id)
+		if e != nil {
 			return e
 		}
-		if e = r.Plates.Update(ctx, v, expected); e != nil {
+		if current.Version() != expectedVersion {
+			return ErrPlayVersionConflict
+		}
+		draft.ID, draft.MatchID = id, current.MatchID()
+		value, e := RestorePlay(draft, current.Version()+1, current.CreatedAt(), s.clock.Now(), nil)
+		if e != nil {
 			return e
 		}
-		result = v
+		if e = validatePlayReferences(ctx, r, value); e != nil {
+			return e
+		}
+		plays, e := r.Plays.ListByMatch(ctx, value.MatchID())
+		if e != nil {
+			return e
+		}
+		if e = validatePlayNeighbors(value, plays, id); e != nil {
+			return e
+		}
+		if e = r.Plays.Replace(ctx, value, expectedVersion, s.clock.Now()); e != nil {
+			return e
+		}
+		result = value
 		return nil
 	})
 	return result, e
 }
-func (s *Service) DeletePlate(ctx context.Context, id PlateID) error {
+func (s *Service) DeletePlay(ctx context.Context, id PlayID, expectedVersion uint64) error {
 	return s.uow.WithinGameTransaction(ctx, func(r Repositories) error {
-		v, e := r.Plates.GetForUpdate(ctx, id)
+		v, e := r.Plays.GetForUpdate(ctx, id)
 		if e != nil {
 			return e
 		}
-		expected := v.Version()
-		if e = v.Delete(s.clock.Now()); e != nil {
-			return e
+		if v.Version() != expectedVersion {
+			return ErrPlayVersionConflict
 		}
-		return r.Plates.Update(ctx, v, expected)
+		return r.Plays.SoftDelete(ctx, id, expectedVersion, s.clock.Now())
+	})
+}
+
+type GameRecord struct {
+	Match   Match
+	Lineups []Lineup
+	Plays   []Play
+}
+
+func (s *Service) CreateGameRecord(ctx context.Context, value GameRecord) error {
+	if err := validateGameRecord(value); err != nil {
+		return err
+	}
+	return s.uow.WithinGameTransaction(ctx, func(r Repositories) error {
+		if _, err := r.Teams.GetForUpdate(ctx, value.Match.HomeTeamID()); err != nil {
+			return err
+		}
+		if _, err := r.Teams.GetForUpdate(ctx, value.Match.AwayTeamID()); err != nil {
+			return err
+		}
+		if err := r.Matches.Create(ctx, value.Match); err != nil {
+			return err
+		}
+		for _, lineup := range value.Lineups {
+			if err := validateLineupReferences(ctx, r, lineup); err != nil {
+				return err
+			}
+			if err := r.Lineups.Create(ctx, lineup); err != nil {
+				return err
+			}
+		}
+		for _, play := range value.Plays {
+			if err := validatePlayReferences(ctx, r, play); err != nil {
+				return err
+			}
+			if err := r.Plays.Create(ctx, play); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 
@@ -291,17 +339,39 @@ func validateLineupReferences(ctx context.Context, r Repositories, v Lineup) err
 	}
 	return nil
 }
-func validatePlateReferences(ctx context.Context, r Repositories, v Plate) error {
+func validatePlayReferences(ctx context.Context, r Repositories, v Play) error {
 	if _, e := r.Matches.GetForUpdate(ctx, v.MatchID()); e != nil {
 		return e
 	}
-	ids := []player.ID{v.BatterID(), v.PitcherID()}
-	for _, runner := range v.Runners() {
-		if runner != nil {
-			ids = append(ids, *runner)
+	ids := []player.ID{v.BatterID(), v.StartingPitcherID()}
+	for _, pitch := range v.Pitches() {
+		ids = append(ids, pitch.PitcherID, pitch.BatterID)
+	}
+	for _, runner := range v.RunnerOutcomes() {
+		ids = append(ids, runner.RunnerID)
+		if runner.ChargedPitcherID != nil {
+			ids = append(ids, *runner.ChargedPitcherID)
+		}
+		if runner.RBIBatterID != nil {
+			ids = append(ids, *runner.RBIBatterID)
 		}
 	}
+	for _, fielding := range v.FieldingOutcomes() {
+		ids = append(ids, fielding.FielderID)
+	}
+	for _, situation := range []Situation{v.Before(), v.After()} {
+		for _, runner := range situation.Runners {
+			if runner != nil {
+				ids = append(ids, *runner)
+			}
+		}
+	}
+	seen := map[player.ID]bool{}
 	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
 		if _, e := r.Players.GetForUpdate(ctx, id); e != nil {
 			return e
 		}
@@ -309,8 +379,61 @@ func validatePlateReferences(ctx context.Context, r Repositories, v Plate) error
 	return nil
 }
 
+func validateGameRecord(v GameRecord) error {
+	for i, play := range v.Plays {
+		if play.MatchID() != v.Match.ID() || play.Sequence() != uint32(i+1) {
+			return errors.New("game record plays must be contiguous and belong to match")
+		}
+		if i > 0 && !situationsConnect(v.Plays[i-1], play) {
+			return errors.New("game record play situations are discontinuous")
+		}
+	}
+	return nil
+}
+func validatePlayNeighbors(value Play, plays []Play, except PlayID) error {
+	filtered := make([]Play, 0, len(plays)+1)
+	for _, play := range plays {
+		if play.ID() != except {
+			filtered = append(filtered, play)
+		}
+	}
+	filtered = append(filtered, value)
+	for i := 1; i < len(filtered); i++ {
+		for j := i; j > 0 && filtered[j].Sequence() < filtered[j-1].Sequence(); j-- {
+			filtered[j], filtered[j-1] = filtered[j-1], filtered[j]
+		}
+	}
+	for i, play := range filtered {
+		if play.Sequence() != uint32(i+1) {
+			return errors.New("play sequence must be contiguous")
+		}
+		if i > 0 && !situationsConnect(filtered[i-1], play) {
+			return errors.New("play situations are discontinuous")
+		}
+	}
+	return nil
+}
+func situationsConnect(previous, next Play) bool {
+	a, b := previous.After(), next.Before()
+	if previous.Inning() == next.Inning() && previous.Half() == next.Half() {
+		return a.Outs == b.Outs && a.HomeScore == b.HomeScore && a.AwayScore == b.AwayScore && sameRunners(a.Runners, b.Runners)
+	}
+	return a.Outs == 3 && b.Outs == 0 && b.HomeScore == a.HomeScore && b.AwayScore == a.AwayScore && sameRunners(b.Runners, [3]*player.ID{})
+}
+func sameRunners(a, b [3]*player.ID) bool {
+	for i := range a {
+		if a[i] == nil && b[i] == nil {
+			continue
+		}
+		if a[i] == nil || b[i] == nil || *a[i] != *b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 type Detail struct {
 	Match   Match
 	Lineups []Lineup
-	Plates  []Plate
+	Plays   []Play
 }

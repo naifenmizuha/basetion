@@ -537,20 +537,20 @@ func newGameProxy(ctx context.Context, state *lua.LState, service *game.QuerySer
 		state.Push(matchToLua(state, value))
 		return 1
 	}))
-	backing.RawSetString("plates", state.NewFunction(func(state *lua.LState) int {
-		id := requiredID(state, "game.plates", "match_id")
+	backing.RawSetString("plays", state.NewFunction(func(state *lua.LState) int {
+		id := requiredID(state, "game.plays", "match_id")
 		if id == "" {
 			return 0
 		}
-		values, err := service.ListPlates(ctx, game.MatchID(id))
+		values, err := service.ListPlays(ctx, game.MatchID(id))
 		if err != nil {
-			state.RaiseError("list plates: %v", err)
+			state.RaiseError("list plays: %v", err)
 			return 0
 		}
 		result := state.NewTable()
 		explicitArrays[result] = struct{}{}
 		for _, value := range values {
-			result.Append(plateToLua(state, value))
+			result.Append(playToLua(state, value, explicitArrays))
 		}
 		state.Push(result)
 		return 1
@@ -692,14 +692,14 @@ func lineupToLua(state *lua.LState, value game.Lineup, explicitArrays map[*lua.L
 	result.RawSetString("entries", entries)
 	return result
 }
-func plateTypeName(value game.PlateType) string {
-	names := []string{"", "out", "single", "double", "triple", "home_run", "walk", "intentional_walk", "strikeout", "hit_by_pitch", "error", "fielders_choice", "sacrifice", "interference", "other"}
+func battingResultName(value game.BattingResult) string {
+	names := []string{"", "single", "double", "triple", "home_run", "walk", "intentional_walk", "hit_by_pitch", "strikeout", "ground_out", "fly_out", "line_out", "fielders_choice", "reached_on_error", "sacrifice_bunt", "sacrifice_fly", "interference", "other"}
 	if int(value) >= len(names) {
 		return ""
 	}
 	return names[value]
 }
-func plateToLua(state *lua.LState, value game.Plate) *lua.LTable {
+func playToLua(state *lua.LState, value game.Play, explicitArrays map[*lua.LTable]struct{}) *lua.LTable {
 	result := state.NewTable()
 	result.RawSetString("id", lua.LString(value.ID()))
 	result.RawSetString("match_id", lua.LString(value.MatchID()))
@@ -712,26 +712,46 @@ func plateToLua(state *lua.LState, value game.Plate) *lua.LTable {
 	result.RawSetString("half", lua.LString(half))
 	result.RawSetString("batting_order", lua.LNumber(value.BattingOrder()))
 	result.RawSetString("batter_id", lua.LString(value.BatterID()))
-	result.RawSetString("pitcher_id", lua.LString(value.PitcherID()))
-	result.RawSetString("pitch_sequence", lua.LString(value.PitchSequence()))
-	result.RawSetString("plate_type", lua.LString(plateTypeName(value.Type())))
+	result.RawSetString("starting_pitcher_id", lua.LString(value.StartingPitcherID()))
+	result.RawSetString("batting_result", lua.LString(battingResultName(value.BattingResult())))
 	result.RawSetString("result_description", lua.LString(value.ResultDescription()))
-	runners := value.Runners()
-	fields := []string{"runner_on_first_id", "runner_on_second_id", "runner_on_third_id"}
-	for i, field := range fields {
-		if runners[i] == nil {
-			setNull(state, result, field)
-		} else {
-			result.RawSetString(field, lua.LString(*runners[i]))
-		}
+	for name, situation := range map[string]game.Situation{"before": value.Before(), "after": value.After()} {
+		x := state.NewTable()
+		x.RawSetString("outs", lua.LNumber(situation.Outs))
+		x.RawSetString("home_score", lua.LNumber(situation.HomeScore))
+		x.RawSetString("away_score", lua.LNumber(situation.AwayScore))
+		result.RawSetString(name, x)
 	}
-	if score := value.Score(); score == nil {
-		setNull(state, result, "home_score")
-		setNull(state, result, "away_score")
-	} else {
-		result.RawSetString("home_score", lua.LNumber(score.Home))
-		result.RawSetString("away_score", lua.LNumber(score.Away))
+	pitches := state.NewTable()
+	explicitArrays[pitches] = struct{}{}
+	for _, p := range value.Pitches() {
+		x := state.NewTable()
+		x.RawSetString("sequence", lua.LNumber(p.Sequence))
+		x.RawSetString("pitcher_id", lua.LString(p.PitcherID))
+		x.RawSetString("batter_id", lua.LString(p.BatterID))
+		x.RawSetString("result", lua.LNumber(p.Result))
+		pitches.Append(x)
 	}
+	result.RawSetString("pitches", pitches)
+	runners := state.NewTable()
+	explicitArrays[runners] = struct{}{}
+	for _, v := range value.RunnerOutcomes() {
+		x := state.NewTable()
+		x.RawSetString("runner_id", lua.LString(v.RunnerID))
+		x.RawSetString("result", lua.LNumber(v.Result))
+		x.RawSetString("scored", lua.LBool(v.Scored))
+		runners.Append(x)
+	}
+	result.RawSetString("runner_results", runners)
+	fielding := state.NewTable()
+	explicitArrays[fielding] = struct{}{}
+	for _, v := range value.FieldingOutcomes() {
+		x := state.NewTable()
+		x.RawSetString("fielder_id", lua.LString(v.FielderID))
+		x.RawSetString("result", lua.LNumber(v.Result))
+		fielding.Append(x)
+	}
+	result.RawSetString("fielding_results", fielding)
 	return result
 }
 func setNull(state *lua.LState, table *lua.LTable, field string) {

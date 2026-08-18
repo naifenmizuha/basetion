@@ -101,10 +101,10 @@ func TestRepositorySkillsContainRequiredGuidance(t *testing.T) {
 	}
 	for _, phrase := range []string{
 		"team_query", "team_modify", "confirmed=true", "不得猜测", "幂等",
-		"roster.teams", "roster.players", "game.matches", "game.match", "game.plates", "game.score", "lineup.list", "training.records",
+		"roster.teams", "roster.players", "game.matches", "game.match", "game.plays", "game.score", "lineup.list", "training.records",
 		"team.create", "player.create", "player.update", "player.set_active", "roster.assign", "roster.change_jersey", "roster.leave",
 		"match.create", "match.update", "match.set_status", "match.delete", "lineup.create", "lineup.replace", "lineup.delete",
-		"plate.create", "plate.update", "plate.delete", "training.create", "training.update", "training.delete",
+		"training.create", "training.update", "training.delete",
 		"一次调用 `team_query` 的 `describe`", "一次启用全部必要模块", "不得仅为取得下一次查询所需的 ID 而拆分 `query`", "根目录 `describe` 仅用于",
 		"原始对象只用于脚本内部计算", "不得直接作为 `main` 的返回值", "构造面向当前任务的最小证据结构",
 		"除非后续 `team_modify` 确实需要稳定 ID", "已经转换为名称或业务标签的 ID 不得同时返回", "过滤、分组、聚合、排序和压缩重复模式",
@@ -118,7 +118,7 @@ func TestRepositorySkillsContainRequiredGuidance(t *testing.T) {
 			t.Errorf("team Skill missing projection guidance %q", phrase)
 		}
 	}
-	if strings.Contains(teamSkill.Content, "player = target_player") || strings.Contains(teamSkill.Content, "return team.game.plates") {
+	if strings.Contains(teamSkill.Content, "player = target_player") || strings.Contains(teamSkill.Content, "return team.game.plays") {
 		t.Error("team Skill examples directly return raw domain objects")
 	}
 }

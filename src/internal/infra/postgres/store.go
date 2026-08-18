@@ -45,7 +45,7 @@ func (s *Store) WithinGameTransaction(ctx context.Context, fn func(game.Reposito
 		return fmt.Errorf("begin game transaction: %w", err)
 	}
 	repositories := game.Repositories{
-		Matches: &MatchRepository{db: tx}, Lineups: &LineupRepository{db: tx}, Plates: &PlateRepository{db: tx},
+		Matches: &MatchRepository{db: tx}, Lineups: &LineupRepository{db: tx}, Plays: &PlayRepository{db: tx},
 		Teams: &TeamRepository{db: tx}, Players: &PlayerRepository{db: tx},
 	}
 	if err := fn(repositories); err != nil {

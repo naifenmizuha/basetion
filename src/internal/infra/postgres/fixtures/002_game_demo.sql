@@ -89,90 +89,55 @@ VALUES
     ('00000000-0000-0000-0000-000000000337', '00000000-0000-0000-0000-000000000201', '00000000-0000-0000-0000-000000000002', 2, 1, '强攻阵容', '00000000-0000-0000-0000-000000000047', 8, 64, 1, now(), now()),
     ('00000000-0000-0000-0000-000000000338', '00000000-0000-0000-0000-000000000201', '00000000-0000-0000-0000-000000000002', 2, 1, '强攻阵容', '00000000-0000-0000-0000-000000000048', 9, 64, 1, now(), now());
 
-INSERT INTO plates(id, match_id, sequence, inning, half, batting_order, batter_id, pitcher_id, pitch_sequence, plate_type, result_description, runner_on_first_id, runner_on_second_id, runner_on_third_id, home_score, away_score, version, created_at, updated_at)
-VALUES
-    ('00000000-0000-0000-0000-000000000401', '00000000-0000-0000-0000-000000000201', 1, 1, 1, 1, '00000000-0000-0000-0000-000000000031', '00000000-0000-0000-0000-000000000012', 'BSF', 2, '曹操击出右外野一垒安打。', '00000000-0000-0000-0000-000000000031', NULL, NULL, 0, 0, 1, now(), now()),
-    ('00000000-0000-0000-0000-000000000402', '00000000-0000-0000-0000-000000000201', 2, 1, 1, 2, '00000000-0000-0000-0000-000000000033', '00000000-0000-0000-0000-000000000012', 'BBSSF', 3, '夏侯惇击出左外野二垒安打，曹操推进至三垒。', NULL, '00000000-0000-0000-0000-000000000033', '00000000-0000-0000-0000-000000000031', 0, 0, 1, now(), now()),
-    ('00000000-0000-0000-0000-000000000403', '00000000-0000-0000-0000-000000000201', 3, 1, 1, 3, '00000000-0000-0000-0000-000000000034', '00000000-0000-0000-0000-000000000012', 'SS', 1, '许褚击出三垒方向滚地球出局，跑者留在原垒位。', NULL, '00000000-0000-0000-0000-000000000033', '00000000-0000-0000-0000-000000000031', 0, 0, 1, now(), now()),
-    ('00000000-0000-0000-0000-000000000404', '00000000-0000-0000-0000-000000000201', 4, 1, 1, 4, '00000000-0000-0000-0000-000000000035', '00000000-0000-0000-0000-000000000012', 'BFF', 12, '张辽击出中外野牺牲飞球，曹操返回本垒得分。', NULL, NULL, '00000000-0000-0000-0000-000000000033', 0, 1, 1, now(), now()),
-    ('00000000-0000-0000-0000-000000000405', '00000000-0000-0000-0000-000000000201', 5, 1, 1, 5, '00000000-0000-0000-0000-000000000036', '00000000-0000-0000-0000-000000000012', 'BBBFB', 6, '徐晃四坏球保送上一垒。', '00000000-0000-0000-0000-000000000036', NULL, '00000000-0000-0000-0000-000000000033', 0, 1, 1, now(), now()),
-    ('00000000-0000-0000-0000-000000000406', '00000000-0000-0000-0000-000000000201', 6, 1, 1, 6, '00000000-0000-0000-0000-000000000037', '00000000-0000-0000-0000-000000000012', 'SSS', 8, '张郃挥棒落空三振，结束一局上半。', NULL, NULL, NULL, 0, 1, 1, now(), now());
-
-WITH half_innings AS (
-    SELECT
-        7 + COALESCE(sum(CASE WHEN (inning, half) IN ((1, 2), (3, 1), (3, 2), (4, 1), (4, 2), (6, 2), (9, 1), (9, 2)) THEN 4 ELSE 3 END) OVER (ORDER BY inning, half ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS sequence_start,
-        inning,
-        half,
-        CASE WHEN (inning, half) IN ((1, 2), (3, 1), (3, 2), (4, 1), (4, 2), (6, 2), (9, 1), (9, 2)) THEN 4 ELSE 3 END AS plate_count
-    FROM generate_series(1, 9) AS innings(inning)
-    CROSS JOIN (VALUES (1), (2)) AS halves(half)
-    WHERE inning > 1 OR half = 2
-), plate_slots AS (
-    SELECT
-        sequence_start + plate_offset AS sequence,
-        inning,
-        half,
-        plate_offset
-    FROM half_innings
-    CROSS JOIN LATERAL generate_series(0, plate_count - 1) AS offsets(plate_offset)
-), ordered_plates AS (
-    SELECT
-        sequence,
-        inning,
-        half,
-        plate_offset,
-        CASE
-            WHEN half = 1 THEN ((6 + (inning - 2) * 3 + plate_offset) % 9) + 1
-            ELSE (((inning - 1) * 3 + plate_offset) % 9) + 1
-        END AS batting_order
-    FROM plate_slots
+INSERT INTO plays(
+    id, match_id, sequence, inning, half, batting_order, batter_id, starting_pitcher_id,
+    batting_result, result_description,
+    before_outs, before_home_score, before_away_score,
+    before_runner_on_first_id, before_runner_on_second_id, before_runner_on_third_id,
+    after_outs, after_home_score, after_away_score,
+    after_runner_on_first_id, after_runner_on_second_id, after_runner_on_third_id,
+    version, created_at, updated_at
 )
-INSERT INTO plates(id, match_id, sequence, inning, half, batting_order, batter_id, pitcher_id, pitch_sequence, plate_type, result_description, runner_on_first_id, runner_on_second_id, runner_on_third_id, home_score, away_score, version, created_at, updated_at)
-SELECT
-    ('00000000-0000-0000-0000-' || lpad(sequence::text, 12, '0'))::uuid,
+VALUES (
+    '00000000-0000-0000-0000-000000000401',
     '00000000-0000-0000-0000-000000000201',
-    sequence,
-    inning,
-    half,
-    batting_order,
-    CASE half
-        WHEN 1 THEN (ARRAY[
-            '00000000-0000-0000-0000-000000000031', '00000000-0000-0000-0000-000000000033', '00000000-0000-0000-0000-000000000034',
-            '00000000-0000-0000-0000-000000000035', '00000000-0000-0000-0000-000000000036', '00000000-0000-0000-0000-000000000037',
-            '00000000-0000-0000-0000-000000000038', '00000000-0000-0000-0000-000000000039', '00000000-0000-0000-0000-000000000032'
-        ]::uuid[])[batting_order]
-        ELSE (ARRAY[
-            '00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000013', '00000000-0000-0000-0000-000000000014',
-            '00000000-0000-0000-0000-000000000015', '00000000-0000-0000-0000-000000000016', '00000000-0000-0000-0000-000000000017',
-            '00000000-0000-0000-0000-000000000018', '00000000-0000-0000-0000-000000000019', '00000000-0000-0000-0000-000000000012'
-        ]::uuid[])[batting_order]
-    END,
-    CASE half
-        WHEN 1 THEN '00000000-0000-0000-0000-000000000012'::uuid
-        ELSE '00000000-0000-0000-0000-000000000032'::uuid
-    END,
-    CASE WHEN inning = 9 AND half = 2 AND plate_offset = 3 THEN 'BFS' ELSE (ARRAY['BFS', 'SSS', 'BBF', 'FS', 'BBBB', 'BSSFF']::text[])[((sequence - 1) % 6) + 1] END,
-    CASE WHEN inning = 9 AND half = 2 AND plate_offset = 3 THEN 2 ELSE (ARRAY[2, 8, 1, 6, 3, 11]::smallint[])[((sequence - 1) % 6) + 1] END,
-    CASE WHEN inning = 9 AND half = 2 AND plate_offset = 3 THEN '刘备击出右外野再见一垒安打，蜀汉队以 5:4 获胜。' ELSE (ARRAY[
-        '击出一垒安打，跑者推进。', '挥棒落空三振出局。', '内野滚地球出局。',
-        '选到保送，上垒延续攻势。', '击出外野飞球出局。', '野手选择上垒。'
-    ]::text[])[((sequence - 1) % 6) + 1] END,
-    NULL,
-    NULL,
-    NULL,
-    CASE
-        WHEN inning < 4 OR (inning = 4 AND half = 1) THEN 2
-        WHEN inning < 6 OR (inning = 6 AND half = 1) THEN 3
-        WHEN inning = 9 AND half = 2 AND plate_offset = 3 THEN 5
-        ELSE 4
-    END,
-    CASE
-        WHEN inning < 3 OR (inning = 3 AND half = 1 AND plate_offset < 3) THEN 1
-        WHEN inning < 9 OR (inning = 9 AND half = 1 AND plate_offset < 3) THEN 3
-        ELSE 4
-    END,
+    1, 9, 2, 1,
+    '00000000-0000-0000-0000-000000000011',
+    '00000000-0000-0000-0000-000000000032',
+    1, '刘备击出右外野再见一垒安打，蜀汉队以 5:4 获胜。',
+    2, 4, 4,
+    NULL, '00000000-0000-0000-0000-000000000013', NULL,
+    2, 5, 4,
+    '00000000-0000-0000-0000-000000000011', NULL, NULL,
+    1, now(), now()
+);
+INSERT INTO pitches(
+    id, play_id, sequence, pitcher_id, batter_id, result,
+    balls_before, strikes_before, balls_after, strikes_after,
+    pitch_type, velocity, zone, description, version, created_at, updated_at
+)
+VALUES (
+    '00000000-0000-0000-0000-000000000501',
+    '00000000-0000-0000-0000-000000000401',
     1,
-    now(),
-    now()
-FROM ordered_plates
-ORDER BY sequence;
+    '00000000-0000-0000-0000-000000000032',
+    '00000000-0000-0000-0000-000000000011',
+    6, 0, 0, 0, 0, '', NULL, NULL, '击球进入场内', 1, now(), now()
+);
+
+INSERT INTO play_runner_results(
+    id, play_id, sequence, runner_id, result, from_base, to_base,
+    out_recorded, scored, charged_pitcher_id, earned, rbi_batter_id,
+    description, version, created_at, updated_at
+)
+VALUES (
+    '00000000-0000-0000-0000-000000000601',
+    '00000000-0000-0000-0000-000000000401',
+    1,
+    '00000000-0000-0000-0000-000000000013',
+    2, 2, 4, FALSE, TRUE,
+    '00000000-0000-0000-0000-000000000032',
+    TRUE,
+    '00000000-0000-0000-0000-000000000011',
+    '二垒跑者返回本垒得到制胜分', 1, now(), now()
+);

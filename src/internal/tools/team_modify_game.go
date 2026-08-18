@@ -51,27 +51,6 @@ type lineupDeleteArguments struct {
 	Kind          string `json:"kind"`
 	VariantNumber *int   `json:"variant_number"`
 }
-type plateArguments struct {
-	PlateID           string  `json:"plate_id"`
-	MatchID           string  `json:"match_id"`
-	Sequence          *int    `json:"sequence"`
-	Inning            *int    `json:"inning"`
-	Half              string  `json:"half"`
-	BattingOrder      *int    `json:"batting_order"`
-	BatterID          string  `json:"batter_id"`
-	PitcherID         string  `json:"pitcher_id"`
-	PitchSequence     string  `json:"pitch_sequence"`
-	PlateType         string  `json:"plate_type"`
-	ResultDescription string  `json:"result_description"`
-	RunnerOnFirstID   *string `json:"runner_on_first_id"`
-	RunnerOnSecondID  *string `json:"runner_on_second_id"`
-	RunnerOnThirdID   *string `json:"runner_on_third_id"`
-	HomeScore         *int    `json:"home_score"`
-	AwayScore         *int    `json:"away_score"`
-}
-type plateDeleteArguments struct {
-	PlateID string `json:"plate_id"`
-}
 
 func matchBaseFields() []modifyFieldDescription {
 	return []modifyFieldDescription{{Name: "home_team_id", Type: "string", Required: true, Description: "主队 ID。"}, {Name: "away_team_id", Type: "string", Required: true, Description: "客队 ID。"}, {Name: "scheduled_at", Type: "string", Required: true, Description: "RFC3339 比赛时间。"}, {Name: "location", Type: "string", Required: true, Description: "比赛地点。"}}
@@ -84,18 +63,6 @@ func lineupKeyFields() []modifyFieldDescription {
 }
 func lineupFields() []modifyFieldDescription {
 	return append(lineupKeyFields(), modifyFieldDescription{Name: "variant_name", Type: "string", Required: true, Description: "阵容名称。"}, modifyFieldDescription{Name: "entries", Type: "array<lineup_entry>", Required: true, Description: "球员、棒次和单一守备位置列表。"})
-}
-func plateFields(create bool) []modifyFieldDescription {
-	fields := []modifyFieldDescription{}
-	if !create {
-		fields = append(fields, modifyFieldDescription{Name: "plate_id", Type: "string", Required: true, Description: "打席 ID。"})
-	} else {
-		fields = append(fields, modifyFieldDescription{Name: "match_id", Type: "string", Required: true, Description: "比赛 ID。"})
-	}
-	return append(fields, []modifyFieldDescription{{Name: "sequence", Type: "integer", Required: true, Description: "比赛内事件顺序。"}, {Name: "inning", Type: "integer", Required: true, Description: "局数。"}, {Name: "half", Type: "string", Required: true, Description: "上下半局。", Values: []string{"top", "bottom"}}, {Name: "batting_order", Type: "integer", Required: true, Description: "棒次。"}, {Name: "batter_id", Type: "string", Required: true, Description: "打者 ID。"}, {Name: "pitcher_id", Type: "string", Required: true, Description: "投手 ID。"}, {Name: "pitch_sequence", Type: "string", Required: true, Description: "B/S/F 投球序列，可为空。"}, {Name: "plate_type", Type: "string", Required: true, Description: "打席类型。", Values: plateTypeValues()}, {Name: "result_description", Type: "string", Required: true, Description: "结果说明。"}, {Name: "runner_on_first_id", Type: "string|null", Required: false, Description: "打席后的1垒跑者。"}, {Name: "runner_on_second_id", Type: "string|null", Required: false, Description: "打席后的2垒跑者。"}, {Name: "runner_on_third_id", Type: "string|null", Required: false, Description: "打席后的3垒跑者。"}, {Name: "home_score", Type: "integer", Required: true, Description: "打席后的主队累计得分。"}, {Name: "away_score", Type: "integer", Required: true, Description: "打席后的客队累计得分。"}}...)
-}
-func plateTypeValues() []string {
-	return []string{"out", "single", "double", "triple", "home_run", "walk", "intentional_walk", "strikeout", "hit_by_pitch", "error", "fielders_choice", "sacrifice", "interference", "other"}
 }
 
 func parseStatus(v string) (game.MatchStatus, error) {
@@ -123,15 +90,6 @@ func parseHalf(v string) (game.Half, error) {
 		return game.Bottom, nil
 	}
 	return 0, fmt.Errorf("unknown inning half %q", v)
-}
-func parsePlateType(v string) (game.PlateType, error) {
-	values := plateTypeValues()
-	for i, x := range values {
-		if x == v {
-			return game.PlateType(i + 1), nil
-		}
-	}
-	return 0, fmt.Errorf("unknown plate type %q", v)
 }
 func requireInt(v *int, name string) (int, error) {
 	if v == nil {
@@ -167,16 +125,6 @@ func parseLineupEntries(values []lineupEntryArguments, newID IDGenerator) ([]gam
 		result = append(result, entry)
 	}
 	return result, nil
-}
-func parseRunners(v plateArguments) [3]*player.ID {
-	convert := func(raw *string) *player.ID {
-		if raw == nil || *raw == "" {
-			return nil
-		}
-		id := player.ID(*raw)
-		return &id
-	}
-	return [3]*player.ID{convert(v.RunnerOnFirstID), convert(v.RunnerOnSecondID), convert(v.RunnerOnThirdID)}
 }
 
 func validateGameArguments(operation string, arguments map[string]any) error {
@@ -233,33 +181,6 @@ func validateGameArguments(operation string, arguments map[string]any) error {
 		}
 		_, err := requireInt(v.VariantNumber, "variant_number")
 		return err
-	case "plate.create", "plate.update":
-		var v plateArguments
-		if err := decodeArguments(arguments, &v); err != nil {
-			return err
-		}
-		if _, err := requireInt(v.Sequence, "sequence"); err != nil {
-			return err
-		}
-		if _, err := requireInt(v.Inning, "inning"); err != nil {
-			return err
-		}
-		if _, err := requireInt(v.BattingOrder, "batting_order"); err != nil {
-			return err
-		}
-		if _, err := requireInt(v.HomeScore, "home_score"); err != nil {
-			return err
-		}
-		if _, err := requireInt(v.AwayScore, "away_score"); err != nil {
-			return err
-		}
-		if _, err := parseHalf(v.Half); err != nil {
-			return err
-		}
-		_, err := parsePlateType(v.PlateType)
-		return err
-	case "plate.delete":
-		return decodeArguments(arguments, &plateDeleteArguments{})
 	default:
 		return fmt.Errorf("unknown team modify operation %q", operation)
 	}
@@ -366,43 +287,6 @@ func (h *teamModifyHandler) executeGame(ctx context.Context, operation string, a
 			return nil, err
 		}
 		return map[string]any{"match_id": v.MatchID, "team_id": v.TeamID, "deleted": true}, nil
-	case "plate.create", "plate.update":
-		var v plateArguments
-		if err := decodeArguments(arguments, &v); err != nil {
-			return nil, err
-		}
-		sequence, _ := requireInt(v.Sequence, "sequence")
-		inning, _ := requireInt(v.Inning, "inning")
-		order, _ := requireInt(v.BattingOrder, "batting_order")
-		home, _ := requireInt(v.HomeScore, "home_score")
-		away, _ := requireInt(v.AwayScore, "away_score")
-		half, err := parseHalf(v.Half)
-		if err != nil {
-			return nil, err
-		}
-		kind, err := parsePlateType(v.PlateType)
-		if err != nil {
-			return nil, err
-		}
-		var value game.Plate
-		if operation == "plate.create" {
-			value, err = h.games.CreatePlateWith(ctx, game.PlateID(h.newID()), game.MatchID(v.MatchID), sequence, inning, half, order, player.ID(v.BatterID), player.ID(v.PitcherID), v.PitchSequence, kind, v.ResultDescription, parseRunners(v), home, away)
-		} else {
-			value, err = h.games.UpdatePlate(ctx, game.PlateID(v.PlateID), sequence, inning, half, order, player.ID(v.BatterID), player.ID(v.PitcherID), v.PitchSequence, kind, v.ResultDescription, parseRunners(v), home, away)
-		}
-		if err != nil {
-			return nil, err
-		}
-		return plateResult(value), nil
-	case "plate.delete":
-		var v plateDeleteArguments
-		if err := decodeArguments(arguments, &v); err != nil {
-			return nil, err
-		}
-		if err := h.games.DeletePlate(ctx, game.PlateID(v.PlateID)); err != nil {
-			return nil, err
-		}
-		return map[string]any{"plate_id": v.PlateID, "deleted": true}, nil
 	default:
 		return nil, fmt.Errorf("unknown team modify operation %q", operation)
 	}
@@ -416,15 +300,4 @@ func matchStatusResult(v game.MatchStatus) string {
 }
 func lineupResult(v game.Lineup) map[string]any {
 	return map[string]any{"match_id": v.MatchID(), "team_id": v.TeamID(), "kind": v.Kind(), "variant_number": v.VariantNumber(), "variant_name": v.VariantName(), "version": v.Version()}
-}
-func plateResult(v game.Plate) map[string]any {
-	result := map[string]any{"id": v.ID(), "match_id": v.MatchID(), "sequence": v.Sequence(), "version": v.Version()}
-	if score := v.Score(); score != nil {
-		result["home_score"] = score.Home
-		result["away_score"] = score.Away
-	} else {
-		result["home_score"] = nil
-		result["away_score"] = nil
-	}
-	return result
 }
