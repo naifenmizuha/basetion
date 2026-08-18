@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 
@@ -35,18 +34,8 @@ type DatabaseConfig struct {
 	Dev DatabaseProfileConfig `mapstructure:"dev"`
 }
 
-type DatabaseMode string
-
-const (
-	DatabaseModeFixed     DatabaseMode = "fixed"
-	DatabaseModeTemporary DatabaseMode = "temporary"
-)
-
 type DatabaseProfileConfig struct {
-	Mode            DatabaseMode `mapstructure:"mode"`
-	URL             string       `mapstructure:"url"`
-	AdminURL        string       `mapstructure:"admin_url"`
-	TemporaryPrefix string       `mapstructure:"temporary_prefix"`
+	URL string `mapstructure:"url"`
 }
 
 type OpenAIConfig struct {
@@ -143,8 +132,8 @@ func loadFiles(configPath, envPath string) (Config, error) {
 }
 
 // LoadDatabaseFile reads and validates only the database profiles. It allows
-// infrastructure tests to share the project database configuration without
-// requiring model credentials or publishing the process-wide snapshot.
+// database maintenance commands and infrastructure tests to use project
+// configuration without requiring model credentials or publishing a snapshot.
 func LoadDatabaseFile(path string) (DatabaseConfig, error) {
 	cfg, err := decodeConfigFile(path)
 	if err != nil {
@@ -211,10 +200,8 @@ func (c Config) Validate() error {
 	if c.OpenAI.APIKeyEnv == "" {
 		problems = append(problems, errors.New("openai.api_key_env is required"))
 	}
-	if c.OpenAI.APIKey == "" {
-		if c.OpenAI.APIKeyEnv != "" {
-			problems = append(problems, fmt.Errorf("environment variable %q referenced by openai.api_key_env is required", c.OpenAI.APIKeyEnv))
-		}
+	if c.OpenAI.APIKey == "" && c.OpenAI.APIKeyEnv != "" {
+		problems = append(problems, fmt.Errorf("environment variable %q referenced by openai.api_key_env is required", c.OpenAI.APIKeyEnv))
 	}
 	if c.OpenAI.ReasoningEffort == "" {
 		problems = append(problems, errors.New("openai.reasoning_effort must not be empty"))
@@ -234,52 +221,19 @@ func (c Config) Validate() error {
 	return errors.Join(problems...)
 }
 
-var temporaryPrefixPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-
 func (c *DatabaseProfileConfig) trim() {
-	c.Mode = DatabaseMode(strings.TrimSpace(string(c.Mode)))
 	c.URL = strings.TrimSpace(c.URL)
-	c.AdminURL = strings.TrimSpace(c.AdminURL)
-	c.TemporaryPrefix = strings.TrimSpace(c.TemporaryPrefix)
 }
 
 func (c DatabaseConfig) Validate() error {
 	var problems []error
-	if c.Run.Mode != DatabaseModeFixed {
-		problems = append(problems, errors.New("database.run.mode must be fixed"))
+	if c.Run.URL == "" {
+		problems = append(problems, errors.New("database.run.url is required"))
 	}
-	problems = append(problems, validateDatabaseProfile("database.run", c.Run)...)
-	if c.Dev.Mode != DatabaseModeFixed && c.Dev.Mode != DatabaseModeTemporary {
-		problems = append(problems, errors.New("database.dev.mode must be fixed or temporary"))
+	if c.Dev.URL == "" {
+		problems = append(problems, errors.New("database.dev.url is required"))
 	}
-	problems = append(problems, validateDatabaseProfile("database.dev", c.Dev)...)
 	return errors.Join(problems...)
-}
-
-func validateDatabaseProfile(path string, profile DatabaseProfileConfig) []error {
-	var problems []error
-	switch profile.Mode {
-	case DatabaseModeFixed:
-		if profile.URL == "" {
-			problems = append(problems, fmt.Errorf("%s.url is required in fixed mode", path))
-		}
-		if profile.AdminURL != "" || profile.TemporaryPrefix != "" {
-			problems = append(problems, fmt.Errorf("%s.admin_url and temporary_prefix are only valid in temporary mode", path))
-		}
-	case DatabaseModeTemporary:
-		if profile.URL != "" {
-			problems = append(problems, fmt.Errorf("%s.url is only valid in fixed mode", path))
-		}
-		if profile.AdminURL == "" {
-			problems = append(problems, fmt.Errorf("%s.admin_url is required in temporary mode", path))
-		}
-		if profile.TemporaryPrefix == "" {
-			problems = append(problems, fmt.Errorf("%s.temporary_prefix is required in temporary mode", path))
-		} else if len(profile.TemporaryPrefix) > 40 || !temporaryPrefixPattern.MatchString(profile.TemporaryPrefix) {
-			problems = append(problems, fmt.Errorf("%s.temporary_prefix must match %s and be at most 40 characters", path, temporaryPrefixPattern))
-		}
-	}
-	return problems
 }
 
 // DiagnosticFields returns configuration safe for structured logs. Secrets are
@@ -290,8 +244,8 @@ func (c Config) DiagnosticFields() map[string]any {
 		"base_url_set":      c.OpenAI.BaseURL != "",
 		"reasoning_effort":  c.OpenAI.ReasoningEffort,
 		"reasoning_summary": c.OpenAI.ReasoningSummary,
-		"database_run_mode": c.Database.Run.Mode,
-		"database_dev_mode": c.Database.Dev.Mode,
+		"database_run_set":  c.Database.Run.URL != "",
+		"database_dev_set":  c.Database.Dev.URL != "",
 		"session_dir":       c.Session.Dir,
 		"max_iterations":    c.Agent.MaxIterations,
 		"unsafe_debug_data": c.Agent.UnsafeDebugData,

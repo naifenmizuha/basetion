@@ -17,13 +17,10 @@ reasoning_effort = "medium"
 reasoning_summary = "concise"
 
 [database.run]
-mode = "fixed"
 url = "postgres://file.invalid/basetion"
 
 [database.dev]
-mode = "temporary"
-admin_url = "postgres://file.invalid/postgres"
-temporary_prefix = "basetion_test"
+url = "postgres://file.invalid/basetion_dev"
 
 [session]
 dir = "/tmp/file-sessions"
@@ -96,7 +93,7 @@ func TestLoadFile(t *testing.T) {
 	if cfg.OpenAI.Model != "gpt-from-file" || cfg.OpenAI.APIKeyEnv != "TEST_OPENAI_API_KEY" || cfg.OpenAI.APIKey != "file-secret" || cfg.OpenAI.BaseURL != "https://file.invalid/v1" || cfg.OpenAI.ReasoningEffort != "medium" || cfg.OpenAI.ReasoningSummary != "concise" {
 		t.Fatalf("unexpected OpenAI config: %#v", cfg.OpenAI)
 	}
-	if cfg.Database.Run.URL != "postgres://file.invalid/basetion" || cfg.Database.Dev.Mode != DatabaseModeTemporary || cfg.Database.Dev.TemporaryPrefix != "basetion_test" || cfg.Session.Dir != "/tmp/file-sessions" || cfg.Agent.MaxIterations != 7 || !cfg.Agent.UnsafeDebugData {
+	if cfg.Database.Run.URL != "postgres://file.invalid/basetion" || cfg.Database.Dev.URL != "postgres://file.invalid/basetion_dev" || cfg.Session.Dir != "/tmp/file-sessions" || cfg.Agent.MaxIterations != 7 || !cfg.Agent.UnsafeDebugData {
 		t.Fatalf("unexpected config: %#v", cfg)
 	}
 	if fields := cfg.DiagnosticFields(); fields["api_key"] != nil || strings.Contains(fmt.Sprint(fields), cfg.OpenAI.APIKey) {
@@ -112,11 +109,9 @@ model = "gpt-defaults"
 api_key_env = "TEST_OPENAI_API_KEY"
 
 [database.run]
-mode = "fixed"
 url = "postgres://defaults.invalid/basetion"
 
 [database.dev]
-mode = "fixed"
 url = "postgres://defaults.invalid/basetion_dev"
 `
 
@@ -135,7 +130,7 @@ func TestLoadDatabaseFileDoesNotRequireAPIKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if database.Run.Mode != DatabaseModeFixed || database.Dev.Mode != DatabaseModeTemporary {
+	if database.Run.URL != "postgres://file.invalid/basetion" || database.Dev.URL != "postgres://file.invalid/basetion_dev" {
 		t.Fatalf("database=%#v", database)
 	}
 }
@@ -244,67 +239,22 @@ model = ""
 api_key_env = ""
 
 [database.run]
-mode = "fixed"
 url = ""
 
 [database.dev]
-mode = "temporary"
-admin_url = ""
-temporary_prefix = "Bad-Prefix"
+url = ""
 `
 
 	_, err := loadWithoutDotEnv(t, contents)
-	if err == nil || !strings.Contains(err.Error(), "openai.model") || !strings.Contains(err.Error(), "openai.api_key_env") || !strings.Contains(err.Error(), "database.run.url") || !strings.Contains(err.Error(), "database.dev.admin_url") || !strings.Contains(err.Error(), "temporary_prefix") {
+	if err == nil || !strings.Contains(err.Error(), "openai.model") || !strings.Contains(err.Error(), "openai.api_key_env") || !strings.Contains(err.Error(), "database.run.url") || !strings.Contains(err.Error(), "database.dev.url") {
 		t.Fatalf("required values error = %v", err)
 	}
 }
 
 func TestDatabaseProfileValidation(t *testing.T) {
-	tests := []struct {
-		name    string
-		config  DatabaseConfig
-		message string
-	}{
-		{
-			name: "run must be fixed",
-			config: DatabaseConfig{
-				Run: DatabaseProfileConfig{Mode: DatabaseModeTemporary, AdminURL: "postgres://admin/postgres", TemporaryPrefix: "test"},
-				Dev: DatabaseProfileConfig{Mode: DatabaseModeFixed, URL: "postgres://dev/db"},
-			},
-			message: "database.run.mode must be fixed",
-		},
-		{
-			name: "unknown dev mode",
-			config: DatabaseConfig{
-				Run: DatabaseProfileConfig{Mode: DatabaseModeFixed, URL: "postgres://run/db"},
-				Dev: DatabaseProfileConfig{Mode: "other"},
-			},
-			message: "database.dev.mode must be fixed or temporary",
-		},
-		{
-			name: "fixed fields are exclusive",
-			config: DatabaseConfig{
-				Run: DatabaseProfileConfig{Mode: DatabaseModeFixed, URL: "postgres://run/db"},
-				Dev: DatabaseProfileConfig{Mode: DatabaseModeFixed, URL: "postgres://dev/db", TemporaryPrefix: "test"},
-			},
-			message: "only valid in temporary mode",
-		},
-		{
-			name: "temporary fields are exclusive",
-			config: DatabaseConfig{
-				Run: DatabaseProfileConfig{Mode: DatabaseModeFixed, URL: "postgres://run/db"},
-				Dev: DatabaseProfileConfig{Mode: DatabaseModeTemporary, URL: "postgres://dev/db", AdminURL: "postgres://admin/postgres", TemporaryPrefix: "test"},
-			},
-			message: "url is only valid in fixed mode",
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			err := test.config.Validate()
-			if err == nil || !strings.Contains(err.Error(), test.message) {
-				t.Fatalf("Validate() error=%v, want %q", err, test.message)
-			}
-		})
+	err := (DatabaseConfig{}).Validate()
+	if err == nil || !strings.Contains(err.Error(), "database.run.url") || !strings.Contains(err.Error(), "database.dev.url") {
+		t.Fatalf("Validate() error=%v", err)
 	}
 }
 

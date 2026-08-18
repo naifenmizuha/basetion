@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	appconfig "github.com/naifenmizuha/basetion/src/internal/config"
 	"github.com/naifenmizuha/basetion/src/internal/domain/game"
 	"github.com/naifenmizuha/basetion/src/internal/domain/player"
@@ -25,11 +25,6 @@ func (c fixedClock) Now() time.Time { return c.now }
 
 func integrationStore(t *testing.T) *Store {
 	t.Helper()
-	return integrationStoreWithConfig(t, integrationProfile(t))
-}
-
-func integrationProfile(t *testing.T) appconfig.DatabaseProfileConfig {
-	t.Helper()
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("resolve integration test source path")
@@ -39,43 +34,44 @@ func integrationProfile(t *testing.T) appconfig.DatabaseProfileConfig {
 	if err != nil {
 		t.Fatalf("load integration database configuration: %v", err)
 	}
-	if databaseConfig.Dev.Mode != appconfig.DatabaseModeTemporary {
-		t.Skip("database.dev.mode must be temporary for PostgreSQL integration tests")
+	store, err := Open(context.Background(), databaseConfig.Dev.URL)
+	if err != nil {
+		t.Fatalf("open fixed integration database (run `just dev-db-init` first): %v", err)
 	}
-	return databaseConfig.Dev
+	resetIntegrationDatabase(t, store)
+	t.Cleanup(func() {
+		resetIntegrationDatabase(t, store)
+		store.Close()
+	})
+	return store
 }
 
-func integrationStoreWithConfig(t *testing.T, profile appconfig.DatabaseProfileConfig, options ...TemporaryOption) *Store {
+func resetIntegrationDatabase(t *testing.T, _ *Store) {
 	t.Helper()
-	ctx := context.Background()
-	managed, err := OpenTemporary(ctx, profile.AdminURL, profile.TemporaryPrefix, options...)
-	if err != nil {
-		t.Fatalf("create integration database: %v", err)
+	command := exec.Command("python3", projectFile(t, "scripts", "manage_dev_db.py"), "test-reset")
+	command.Dir = projectFile(t)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("reset fixed integration database: %v\n%s", err, output)
 	}
-	name := managed.DatabaseName()
-	// Cleanup callbacks are LIFO: close/drop first, then verify absence.
-	t.Cleanup(func() {
-		admin, err := pgxpool.New(context.Background(), profile.AdminURL)
-		if err != nil {
-			t.Errorf("open admin pool to verify cleanup: %v", err)
-			return
-		}
-		defer admin.Close()
-		var exists bool
-		if err := admin.QueryRow(context.Background(), `SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname=$1)`, name).Scan(&exists); err != nil {
-			t.Errorf("verify temporary database cleanup: %v", err)
-		} else if exists {
-			t.Errorf("temporary database %q still exists", name)
-		}
-	})
-	t.Cleanup(func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := managed.Close(cleanupCtx); err != nil {
-			t.Errorf("drop integration database: %v", err)
-		}
-	})
-	return managed.Store
+}
+
+func loadDevelopmentFixtures(t *testing.T, _ *Store) {
+	t.Helper()
+	command := exec.Command("python3", projectFile(t, "scripts", "manage_dev_db.py"), "test-load-development")
+	command.Dir = projectFile(t)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("load development fixtures: %v\n%s", err, output)
+	}
+}
+
+func projectFile(t *testing.T, elements ...string) string {
+	t.Helper()
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve integration test source path")
+	}
+	parts := append([]string{filepath.Dir(filename), "..", "..", "..", ".."}, elements...)
+	return filepath.Join(parts...)
 }
 
 func TestPostgresTrainingRecordLifecycle(t *testing.T) {
@@ -135,7 +131,8 @@ func TestPostgresTrainingRecordLifecycle(t *testing.T) {
 }
 
 func TestPostgresDevelopmentFixtures(t *testing.T) {
-	store := integrationStoreWithConfig(t, integrationProfile(t), WithDevelopmentFixtures())
+	store := integrationStore(t)
+	loadDevelopmentFixtures(t, store)
 	teams, err := store.Teams().List(context.Background(), true)
 	if err != nil {
 		t.Fatal(err)
@@ -206,41 +203,6 @@ func TestPostgresDevelopmentFixtures(t *testing.T) {
 	}
 	if score := lastPlay.After(); score.HomeScore != 5 || score.AwayScore != 4 {
 		t.Fatalf("fixture score=%#v", score)
-	}
-}
-
-func TestPostgresFixedStoreDoesNotOwnDatabase(t *testing.T) {
-	profile := integrationProfile(t)
-	ctx := context.Background()
-	temporary, err := OpenTemporary(ctx, profile.AdminURL, profile.TemporaryPrefix)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := temporary.Close(cleanupCtx); err != nil {
-			t.Errorf("cleanup temporary database: %v", err)
-		}
-	})
-	poolConfig, err := pgxpool.ParseConfig(profile.AdminURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	poolConfig.ConnConfig.Database = temporary.DatabaseName()
-	fixed, err := OpenFixed(ctx, poolConfig.ConnString())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := fixed.Close(ctx); err != nil {
-		t.Fatal(err)
-	}
-	var exists bool
-	if err := temporary.admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname=$1)`, temporary.DatabaseName()).Scan(&exists); err != nil {
-		t.Fatal(err)
-	}
-	if !exists {
-		t.Fatal("fixed store close dropped a database it did not own")
 	}
 }
 

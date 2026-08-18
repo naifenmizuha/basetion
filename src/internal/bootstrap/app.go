@@ -59,45 +59,28 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 	if profile == cli.ProfileDev {
 		databaseProfile = cfg.Database.Dev
 	}
-	var database *infrapostgres.ManagedStore
-	switch databaseProfile.Mode {
-	case config.DatabaseModeFixed:
-		database, err = infrapostgres.OpenFixed(ctx, databaseProfile.URL)
-	case config.DatabaseModeTemporary:
-		database, err = infrapostgres.OpenTemporary(ctx, databaseProfile.AdminURL, databaseProfile.TemporaryPrefix, infrapostgres.WithDevelopmentFixtures())
-	default:
-		err = fmt.Errorf("unsupported database mode %q", databaseProfile.Mode)
-	}
+	database, err := infrapostgres.Open(ctx, databaseProfile.URL)
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化 PostgreSQL 失败: %v\n", err)
 		return 1
 	}
-	defer func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := database.Close(cleanupCtx); err != nil {
-			fmt.Fprintf(stderr, "清理 PostgreSQL 失败: %v\n", err)
-			if exitCode == 0 {
-				exitCode = 1
-			}
-		}
-	}()
-	teamReadService, err := team.NewQueryService(database.Store.Teams())
+	defer database.Close()
+	teamReadService, err := team.NewQueryService(database.Teams())
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化球队读取服务失败: %v\n", err)
 		return 1
 	}
-	rosterReadService, err := roster.NewQueryService(database.Store.RosterReader())
+	rosterReadService, err := roster.NewQueryService(database.RosterReader())
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化名单读取服务失败: %v\n", err)
 		return 1
 	}
-	gameReadService, err := game.NewQueryService(database.Store)
+	gameReadService, err := game.NewQueryService(database)
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化比赛读取服务失败: %v\n", err)
 		return 1
 	}
-	trainingReadService, err := training.NewQueryService(database.Store.Training())
+	trainingReadService, err := training.NewQueryService(database.Training())
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化自训记录读取服务失败: %v\n", err)
 		return 1
@@ -118,27 +101,27 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 		return 1
 	}
 	clock := wallClock{}
-	teamService, err := team.NewService(database.Store.Teams(), clock)
+	teamService, err := team.NewService(database.Teams(), clock)
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化球队写入服务失败: %v\n", err)
 		return 1
 	}
-	playerService, err := player.NewService(database.Store.Players(), clock)
+	playerService, err := player.NewService(database.Players(), clock)
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化球员写入服务失败: %v\n", err)
 		return 1
 	}
-	rosterService, err := roster.NewService(database.Store, clock)
+	rosterService, err := roster.NewService(database, clock)
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化名单写入服务失败: %v\n", err)
 		return 1
 	}
-	gameService, err := game.NewService(database.Store, clock)
+	gameService, err := game.NewService(database, clock)
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化比赛写入服务失败: %v\n", err)
 		return 1
 	}
-	trainingService, err := training.NewService(database.Store.Training(), database.Store.Players(), clock)
+	trainingService, err := training.NewService(database.Training(), database.Players(), clock)
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化自训记录写入服务失败: %v\n", err)
 		return 1

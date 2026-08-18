@@ -1,6 +1,6 @@
-# Run the complete Go test suite.
+# Run the complete Go test suite against the prepared fixed development database.
 all:
-    cd {{justfile_directory()}} && GOTOOLCHAIN=auto go test ./...
+    cd {{justfile_directory()}} && just db check && GOTOOLCHAIN=auto go test ./...
 
 # Query the development fixture roster through the agent.
 player:

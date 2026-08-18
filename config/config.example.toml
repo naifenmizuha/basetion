@@ -6,13 +6,10 @@ reasoning_effort = "high"
 reasoning_summary = "detailed"
 
 [database.run]
-mode = "fixed"
 url = "postgres://basetion:basetion@localhost:5432/basetion?sslmode=disable&connect_timeout=5"
 
 [database.dev]
-mode = "temporary"
-admin_url = "postgres://basetion:basetion@localhost:5432/postgres?sslmode=disable&connect_timeout=5"
-temporary_prefix = "basetion_test"
+url = "postgres://basetion:basetion@localhost:5432/basetion_dev?sslmode=disable&connect_timeout=5"
 
 [session]
 dir = ".basetion/sessions"

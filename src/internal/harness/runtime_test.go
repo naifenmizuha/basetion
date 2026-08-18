@@ -84,11 +84,9 @@ model = "test-model"
 api_key_env = "BASETION_TEST_OPENAI_API_KEY"
 
 [database.run]
-mode = "fixed"
 url = "postgres://test.invalid/basetion"
 
 [database.dev]
-mode = "fixed"
 url = "postgres://test.invalid/basetion_dev"
 
 [agent]
