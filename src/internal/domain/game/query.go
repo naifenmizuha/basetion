@@ -14,6 +14,7 @@ type MatchFilter struct {
 	Limit                      int
 }
 type MatchView struct {
+	ID                                   MatchID
 	ScheduledAt                          time.Time
 	HomeTeamName, AwayTeamName, Location string
 	Status                               MatchStatus
@@ -132,6 +133,7 @@ type MatchPlayerPerformanceView struct {
 
 type QueryRepository interface {
 	ListMatches(context.Context, MatchFilter) ([]MatchView, error)
+	ListPlays(context.Context, []MatchID) ([]PlayEventView, error)
 	SummarizeMatches(context.Context, MatchFilter) ([]MatchSummaryView, error)
 	GetMatchRecords(context.Context, MatchFilter) ([]MatchRecordView, error)
 	ListMatchLineups(context.Context, MatchFilter) ([]MatchLineupsView, error)
@@ -150,6 +152,12 @@ func (s *QueryService) ListMatches(ctx context.Context, filter MatchFilter) ([]M
 		return nil, err
 	}
 	return s.repository.ListMatches(ctx, filter)
+}
+func (s *QueryService) ListPlays(ctx context.Context, matchIDs []MatchID) ([]PlayEventView, error) {
+	if len(matchIDs) == 0 {
+		return nil, errors.New("match ids are required")
+	}
+	return s.repository.ListPlays(ctx, matchIDs)
 }
 func (s *QueryService) SummarizeMatches(ctx context.Context, filter MatchFilter) ([]MatchSummaryView, error) {
 	if err := validateMatchFilter(filter); err != nil {

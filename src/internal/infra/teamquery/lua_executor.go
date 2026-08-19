@@ -33,6 +33,9 @@ type Limits struct {
 	CallStackSize  int
 	RegistrySize   int
 	RegistryMax    int
+	MaxDataCalls   int
+	MaxSourceItems int
+	MaxSourceTotal int
 }
 
 func DefaultLimits() Limits {
@@ -45,6 +48,9 @@ func DefaultLimits() Limits {
 		CallStackSize:  128,
 		RegistrySize:   1024,
 		RegistryMax:    8192,
+		MaxDataCalls:   8,
+		MaxSourceItems: 1000,
+		MaxSourceTotal: 5000,
 	}
 }
 
@@ -95,7 +101,7 @@ func NewLuaExecutor(limits Limits, options ...Option) (*LuaExecutor, error) {
 	if limits.MaxSourceBytes <= 0 || limits.MaxDepth <= 0 || limits.MaxElements <= 0 || limits.MaxResultBytes <= 0 {
 		return nil, errors.New("lua source, depth, element, and result limits must be positive")
 	}
-	if limits.CallStackSize <= 0 || limits.RegistrySize < 128 || limits.RegistryMax < limits.RegistrySize {
+	if limits.CallStackSize <= 0 || limits.RegistrySize < 128 || limits.RegistryMax < limits.RegistrySize || limits.MaxDataCalls <= 0 || limits.MaxSourceItems <= 0 || limits.MaxSourceTotal < limits.MaxSourceItems {
 		return nil, errors.New("invalid lua stack or registry limits")
 	}
 	executor := &LuaExecutor{limits: limits}
@@ -130,7 +136,7 @@ func (e *LuaExecutor) AvailableTopics() []string {
 		result = append(result, "player.list")
 	}
 	if e.game != nil {
-		result = append(result, "game.list", "game.summaries", "game.records", "game.lineups", "game.performances")
+		result = append(result, "game.list", "game.plays")
 	}
 	return result
 }
@@ -167,7 +173,8 @@ func (e *LuaExecutor) Execute(ctx context.Context, query querydomain.Query) (any
 		return nil, fmt.Errorf("initialize lua libraries: %w", err)
 	}
 	explicitArrays := make(map[*lua.LTable]struct{})
-	team, err := e.newTeamProxy(runCtx, state, explicitArrays, query.Modules)
+	references := newExecutionReferences(e.limits)
+	data, err := e.newDataProxy(runCtx, state, explicitArrays, references)
 	if err != nil {
 		return nil, err
 	}
@@ -177,9 +184,9 @@ func (e *LuaExecutor) Execute(ctx context.Context, query querydomain.Query) (any
 	}
 	mainValue := state.GetGlobal("main")
 	if mainValue == lua.LNil || mainValue.Type() != lua.LTFunction {
-		return nil, errors.New("lua program must define main(team)")
+		return nil, errors.New("lua program must define main(data)")
 	}
-	if err := state.CallByParam(lua.P{Fn: mainValue, NRet: 1, Protect: true}, team); err != nil {
+	if err := state.CallByParam(lua.P{Fn: mainValue, NRet: 1, Protect: true}, data); err != nil {
 		return nil, normalizeExecutionError(runCtx, err)
 	}
 	value := state.Get(-1)
@@ -248,7 +255,38 @@ func removeTableFields(state *lua.LState, global string, fields ...string) {
 	}
 }
 
-func (e *LuaExecutor) newTeamProxy(ctx context.Context, state *lua.LState, explicitArrays map[*lua.LTable]struct{}, modules []string) (*lua.LUserData, error) {
+type executionReferences struct {
+	limits      Limits
+	matches     map[*lua.LTable]game.MatchID
+	cache       map[string]lua.LValue
+	dataCalls   int
+	sourceItems int
+}
+
+func newExecutionReferences(limits Limits) *executionReferences {
+	return &executionReferences{limits: limits, matches: make(map[*lua.LTable]game.MatchID), cache: make(map[string]lua.LValue)}
+}
+
+func (r *executionReferences) reserveRead() error {
+	if r.dataCalls >= r.limits.MaxDataCalls {
+		return fmt.Errorf("lua source reads exceed %d calls", r.limits.MaxDataCalls)
+	}
+	r.dataCalls++
+	return nil
+}
+
+func (r *executionReferences) consumeItems(count int) error {
+	if count > r.limits.MaxSourceItems {
+		return fmt.Errorf("lua source read exceeds %d items", r.limits.MaxSourceItems)
+	}
+	if r.sourceItems+count > r.limits.MaxSourceTotal {
+		return fmt.Errorf("lua source reads exceed %d total items", r.limits.MaxSourceTotal)
+	}
+	r.sourceItems += count
+	return nil
+}
+
+func (e *LuaExecutor) newDataProxy(ctx context.Context, state *lua.LState, explicitArrays map[*lua.LTable]struct{}, references *executionReferences) (*lua.LUserData, error) {
 	backing := state.NewTable()
 	backing.RawSetString("array", state.NewFunction(func(state *lua.LState) int {
 		if state.GetTop() != 0 {
@@ -263,34 +301,22 @@ func (e *LuaExecutor) newTeamProxy(ctx context.Context, state *lua.LState, expli
 	null := state.NewUserData()
 	null.Value = nullValue{}
 	backing.RawSetString("null", null)
-	for _, module := range modules {
-		switch module {
-		case "team":
-			if e.teams == nil {
-				return nil, errors.New("team module is unavailable")
-			}
-			backing.RawSetString("team", newTeamModule(ctx, state, e.teams, explicitArrays))
-		case "player":
-			if e.players == nil {
-				return nil, errors.New("player module is unavailable")
-			}
-			backing.RawSetString("player", newPlayerModule(ctx, state, e.players, explicitArrays))
-		case "game":
-			if e.game == nil {
-				return nil, errors.New("game module is unavailable")
-			}
-			backing.RawSetString("game", newGameModule(ctx, state, e.game, explicitArrays))
-		default:
-			return nil, fmt.Errorf("unsupported lua module %q", module)
-		}
+	if e.teams != nil {
+		backing.RawSetString("team", newTeamModule(ctx, state, e.teams, explicitArrays, references))
+	}
+	if e.players != nil {
+		backing.RawSetString("player", newPlayerModule(ctx, state, e.players, explicitArrays, references))
+	}
+	if e.game != nil {
+		backing.RawSetString("game", newGameModule(ctx, state, e.game, explicitArrays, references))
 	}
 
 	proxy := state.NewUserData()
-	proxy.Value = struct{ name string }{name: "team"}
+	proxy.Value = struct{ name string }{name: "data"}
 	meta := state.NewTable()
 	meta.RawSetString("__index", backing)
 	meta.RawSetString("__newindex", state.NewFunction(func(state *lua.LState) int {
-		state.RaiseError("team is read-only")
+		state.RaiseError("data is read-only")
 		return 0
 	}))
 	meta.RawSetString("__metatable", lua.LFalse)

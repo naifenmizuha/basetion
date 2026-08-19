@@ -46,7 +46,7 @@ func TestTeamQueryToolDescribeAndQuery(t *testing.T) {
 		t.Fatalf("unexpected description: %#v", description)
 	}
 
-	queryJSON, err := teamQueryTool.InvokableRun(context.Background(), `{"mode":"query","program":"function main(team) return {total = 2 + 3} end"}`)
+	queryJSON, err := teamQueryTool.InvokableRun(context.Background(), `{"mode":"query","program":"function main(data) return {total = 2 + 3} end"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,14 +92,11 @@ func TestTeamQueryToolValidation(t *testing.T) {
 	teamQueryTool := newTestTeamQueryTool(t)
 	tests := []string{
 		`{"mode":"invalid"}`,
-		`{"mode":"describe","modules":["team"]}`,
-		`{"mode":"describe","modules":[]}`,
 		`{"mode":"describe","program":"function main() end"}`,
 		`{"mode":"describe","program":""}`,
 		`{"mode":"query","topics":["player.list"],"program":"function main() end"}`,
 		`{"mode":"query","topics":[],"program":"function main() end"}`,
 		`{"mode":"query"}`,
-		`{"mode":"query","modules":["game"],"program":"function main() end"}`,
 	}
 	for _, input := range tests {
 		if _, err := teamQueryTool.InvokableRun(context.Background(), input); err == nil {

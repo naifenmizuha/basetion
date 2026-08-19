@@ -100,12 +100,12 @@ func TestRepositorySkillsContainRequiredGuidance(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, phrase := range []string{
-		"team_query", "team_modify", "confirmed=true", "不得猜测", "幂等",
+		"team_query", "team_fetch", "team_modify", "confirmed=true", "不得猜测", "幂等",
 		"team.list", "player.list", "game.list", "game.summaries", "game.records", "game.lineups", "game.performances",
 		"team.create", "player.create", "player.update", "player.set_active", "player.change_jersey",
 		"match.create", "match.update", "match.set_status", "match.delete", "lineup.create", "lineup.replace", "lineup.delete",
 		"training.create", "training.update", "training.delete",
-		"一次调用 `team_query` 的 `describe`", "一次启用全部必要模块", "不得拆分查询来猜测或传递内部 ID", "根目录 `describe` 仅用于",
+		"调用相应工具的 `describe`", "main(data)", "不得拆分工具调用来猜测或传递内部 ID", "根目录 `describe` 仅用于",
 		"查询投影只用于脚本内部计算", "不得直接作为 `main` 的返回值", "构造面向当前任务的最小证据结构",
 		"不返回实体 ID", "不得尝试从名称推测 ID", "过滤、分组、聚合、排序和压缩重复模式",
 	} {
@@ -113,7 +113,7 @@ func TestRepositorySkillsContainRequiredGuidance(t *testing.T) {
 			t.Errorf("team Skill missing %q", phrase)
 		}
 	}
-	for _, phrase := range []string{"同一轮并行执行两者的精确 `describe`", "participant_names", "local result = {}", "score = {home = match.home_score", "不支持入队、离队或转队"} {
+	for _, phrase := range []string{"同一轮并行执行两者的精确 `describe`", "participant_names", "game.performances", "data.game.plays", "不支持入队、离队或转队"} {
 		if !strings.Contains(teamSkill.Content, phrase) {
 			t.Errorf("team Skill missing projection guidance %q", phrase)
 		}

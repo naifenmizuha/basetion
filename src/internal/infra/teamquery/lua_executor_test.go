@@ -6,8 +6,35 @@ import (
 	"testing"
 	"time"
 
+	"github.com/naifenmizuha/basetion/src/internal/domain/game"
 	domain "github.com/naifenmizuha/basetion/src/internal/domain/teamquery"
 )
+
+type dynamicGameRepository struct{ matchCalls, playCalls int }
+
+func (r *dynamicGameRepository) ListMatches(_ context.Context, _ game.MatchFilter) ([]game.MatchView, error) {
+	r.matchCalls++
+	return []game.MatchView{{ID: "match-a", ScheduledAt: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), HomeTeamName: "蜀汉队", AwayTeamName: "魏国队", Location: "主场", Status: game.MatchFinal}}, nil
+}
+func (r *dynamicGameRepository) ListPlays(_ context.Context, ids []game.MatchID) ([]game.PlayEventView, error) {
+	r.playCalls++
+	if len(ids) != 1 || ids[0] != "match-a" {
+		return nil, context.Canceled
+	}
+	return []game.PlayEventView{{Sequence: 1, Inning: 1, Half: game.Top, Batter: game.PlayerIdentityView{Name: "甲", TeamName: "魏国队", JerseyNumber: 1}, StartingPitcher: game.PlayerIdentityView{Name: "乙", TeamName: "蜀汉队", JerseyNumber: 18}, Situation: game.SituationView{Outs: 1, HomeScore: 2, AwayScore: 1}, BattingResult: game.BattingSingle, ResultDescription: "安打"}}, nil
+}
+func (*dynamicGameRepository) SummarizeMatches(context.Context, game.MatchFilter) ([]game.MatchSummaryView, error) {
+	return nil, nil
+}
+func (*dynamicGameRepository) GetMatchRecords(context.Context, game.MatchFilter) ([]game.MatchRecordView, error) {
+	return nil, nil
+}
+func (*dynamicGameRepository) ListMatchLineups(context.Context, game.MatchFilter) ([]game.MatchLineupsView, error) {
+	return nil, nil
+}
+func (*dynamicGameRepository) AnalyzeMatchPlayers(context.Context, game.MatchFilter) ([]game.MatchPlayerPerformanceView, error) {
+	return nil, nil
+}
 
 func testExecutor(t *testing.T) *LuaExecutor {
 	t.Helper()
@@ -145,5 +172,74 @@ func TestLuaExecutorLimits(t *testing.T) {
 	}
 	if _, err := execute(executor, context.Background(), `function main() return "a result larger than twelve bytes" end`); err == nil || !strings.Contains(err.Error(), "result exceeds") {
 		t.Fatalf("result limit error = %v", err)
+	}
+}
+
+func TestLuaExecutorReadsPlaysFromRuntimeMatchReferences(t *testing.T) {
+	t.Parallel()
+	games, err := game.NewQueryService(&dynamicGameRepository{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor, err := NewLuaExecutor(DefaultLimits(), WithGameService(games))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := execute(executor, context.Background(), `
+function main(data)
+  local matches = data.game.list({limit = 5})
+  local selected = data.array()
+  table.insert(selected, matches[1])
+  local plays = data.game.plays({matches = selected})
+  return {match = matches[1], plays = plays}
+end`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := result.(map[string]any)
+	if _, exists := encoded["match"].(map[string]any)["id"]; exists {
+		t.Fatalf("internal match id leaked: %#v", encoded)
+	}
+	plays := encoded["plays"].([]any)
+	if len(plays) != 1 || plays[0].(map[string]any)["result_description"] != "安打" {
+		t.Fatalf("unexpected plays: %#v", plays)
+	}
+	if _, err := execute(executor, context.Background(), `function main(data) return data.game.plays({matches = {{}}}) end`); err == nil || !strings.Contains(err.Error(), "unrecognized match reference") {
+		t.Fatalf("forged reference error = %v", err)
+	}
+}
+
+func TestLuaExecutorLimitsRuntimeReads(t *testing.T) {
+	t.Parallel()
+	limits := DefaultLimits()
+	limits.MaxDataCalls = 1
+	games, _ := game.NewQueryService(&dynamicGameRepository{})
+	executor, _ := NewLuaExecutor(limits, WithGameService(games))
+	_, err := execute(executor, context.Background(), `function main(data) local m=data.game.list({limit=1}); return data.game.plays({matches=m}) end`)
+	if err == nil || !strings.Contains(err.Error(), "source reads exceed") {
+		t.Fatalf("runtime read limit error = %v", err)
+	}
+}
+
+func TestLuaExecutorMemoizesIdenticalRuntimeReads(t *testing.T) {
+	t.Parallel()
+	limits := DefaultLimits()
+	limits.MaxDataCalls = 2
+	repository := &dynamicGameRepository{}
+	games, _ := game.NewQueryService(repository)
+	executor, _ := NewLuaExecutor(limits, WithGameService(games))
+	_, err := execute(executor, context.Background(), `
+function main(data)
+  local first = data.game.list({limit=1})
+  local second = data.game.list({limit=1})
+  local a = data.game.plays({matches=first})
+  local b = data.game.plays({matches=second})
+  return {count = #a + #b}
+end`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repository.matchCalls != 1 || repository.playCalls != 1 {
+		t.Fatalf("runtime reads were not memoized: matches=%d plays=%d", repository.matchCalls, repository.playCalls)
 	}
 }

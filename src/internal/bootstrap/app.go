@@ -99,6 +99,11 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 		fmt.Fprintf(stderr, "初始化球队查询工具失败: %v\n", err)
 		return 1
 	}
+	teamFetchTool, err := basetiontools.NewTeamFetch(gameReadService)
+	if err != nil {
+		fmt.Fprintf(stderr, "初始化球队读取工具失败: %v\n", err)
+		return 1
+	}
 	clock := wallClock{}
 	teamService, err := team.NewService(database.Teams(), clock)
 	if err != nil {
@@ -130,7 +135,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 		fmt.Fprintf(stderr, "初始化 AgenticModel 失败: %v\n", err)
 		return 1
 	}
-	runtime, err := harness.NewRuntime(ctx, agenticModel, []tool.BaseTool{teamQueryTool, teamModifyTool}, logger)
+	runtime, err := harness.NewRuntime(ctx, agenticModel, []tool.BaseTool{teamFetchTool, teamQueryTool, teamModifyTool}, logger)
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化 Agent Harness 失败: %v\n", err)
 		return 1

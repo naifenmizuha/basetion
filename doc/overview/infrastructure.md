@@ -20,6 +20,6 @@ SQL 放在 `sql/queries/`，由 `sqlc.yaml` 为 pgx/v5 生成 `src/internal/infr
 
 ## Team Query Lua 运行时
 
-`LuaExecutor` 为每次查询建立独立 GopherLua State，只开放裁剪后的 base、`table`、`string` 和 `math`；文件、系统、动态代码、模块加载、调试、协程、随机数、打印和元表修改均不可用。`team` 是只读 userdata 代理，提供 `array()`、`null` 以及按查询模块启用的 `team`、`player`、`game` 代理。训练服务仍可注入运行时，但不向模型目录或 Lua 代理发布。
+`LuaExecutor` 为每次查询建立独立 GopherLua State，只开放裁剪后的 base、`table`、`string` 和 `math`；文件、系统、动态代码、模块加载、调试、协程、随机数、打印和元表修改均不可用。`data` 是只读 userdata 代理，提供 `array()`、`null` 和固定的 `team`、`player`、`game` 基础读取代理；训练服务仍可注入运行时，但不向模型目录或 Lua 代理发布。
 
-`player.list` 调用 Player 查询服务；`game` 代理发布目录、摘要、完整记录、阵容和表现五个函数，转换领域姓名化投影而不拼接 SQL 或重算统计。默认限制为 2 秒、32 KiB 源码、32 层结果、10,000 个元素和 256 KiB JSON；转换拒绝循环、稀疏/混合表和不可序列化值。
+`player.list` 调用 Player 查询服务；`game.list` 发布无 ID 的比赛投影，并将每个原始 Lua table 映射到仅当前 State 可用的内部比赛引用。`game.plays` 只解析这些原始 table，批量调用 Game 查询服务读取原子 Play；相同基础读取在同一次执行中复用缓存。默认限制还包括最多 8 次数据读取、单次 1,000 项和累计 5,000 项；调用预算在数据库读取前保留。总超时为 2 秒，源码上限 32 KiB，结果上限为 32 层、10,000 个元素和 256 KiB JSON；转换拒绝循环、稀疏/混合表和不可序列化值。

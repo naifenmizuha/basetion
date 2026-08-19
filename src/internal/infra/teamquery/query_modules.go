@@ -2,8 +2,10 @@ package teamquery
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/naifenmizuha/basetion/src/internal/domain/game"
@@ -12,7 +14,7 @@ import (
 	lua "github.com/yuin/gopher-lua"
 )
 
-func newTeamModule(ctx context.Context, state *lua.LState, service *team.QueryService, arrays map[*lua.LTable]struct{}) *lua.LUserData {
+func newTeamModule(ctx context.Context, state *lua.LState, service *team.QueryService, arrays map[*lua.LTable]struct{}, references *executionReferences) *lua.LUserData {
 	backing := state.NewTable()
 	backing.RawSetString("list", state.NewFunction(func(state *lua.LState) int {
 		if state.GetTop() > 1 {
@@ -31,9 +33,22 @@ func newTeamModule(ctx context.Context, state *lua.LState, service *team.QuerySe
 				activeOnly = bool(flag)
 			}
 		}
+		cacheKey := fmt.Sprintf("team.list/%t", activeOnly)
+		if cached, exists := references.cache[cacheKey]; exists {
+			state.Push(cached)
+			return 1
+		}
+		if err := references.reserveRead(); err != nil {
+			state.RaiseError("%v", err)
+			return 0
+		}
 		values, err := service.List(ctx, activeOnly)
 		if err != nil {
 			state.RaiseError("list teams: %v", err)
+			return 0
+		}
+		if err := references.consumeItems(len(values)); err != nil {
+			state.RaiseError("%v", err)
 			return 0
 		}
 		result := state.NewTable()
@@ -44,17 +59,31 @@ func newTeamModule(ctx context.Context, state *lua.LState, service *team.QuerySe
 			entry.RawSetString("active", lua.LBool(value.Active()))
 			result.Append(entry)
 		}
+		references.cache[cacheKey] = result
 		state.Push(result)
 		return 1
 	}))
 	return readOnlyProxy(state, "team", backing)
 }
 
-func newPlayerModule(ctx context.Context, state *lua.LState, service *player.QueryService, arrays map[*lua.LTable]struct{}) *lua.LUserData {
+func newPlayerModule(ctx context.Context, state *lua.LState, service *player.QueryService, arrays map[*lua.LTable]struct{}, references *executionReferences) *lua.LUserData {
 	backing := state.NewTable()
 	backing.RawSetString("list", state.NewFunction(func(state *lua.LState) int {
 		filter, err := playerFilterFromLua(state, "player.list")
 		if err != nil {
+			state.RaiseError("%v", err)
+			return 0
+		}
+		jersey := ""
+		if filter.JerseyNumber != nil {
+			jersey = fmt.Sprintf("%d", *filter.JerseyNumber)
+		}
+		cacheKey := fmt.Sprintf("player.list/%s/%d/%s", filter.TeamName, filter.PositionAny, jersey)
+		if cached, exists := references.cache[cacheKey]; exists {
+			state.Push(cached)
+			return 1
+		}
+		if err := references.reserveRead(); err != nil {
 			state.RaiseError("%v", err)
 			return 0
 		}
@@ -63,11 +92,16 @@ func newPlayerModule(ctx context.Context, state *lua.LState, service *player.Que
 			state.RaiseError("list players: %v", err)
 			return 0
 		}
+		if err := references.consumeItems(len(values)); err != nil {
+			state.RaiseError("%v", err)
+			return 0
+		}
 		result := state.NewTable()
 		arrays[result] = struct{}{}
 		for _, value := range values {
 			result.Append(playerViewToLua(state, value, arrays))
 		}
+		references.cache[cacheKey] = result
 		state.Push(result)
 		return 1
 	}))
@@ -132,11 +166,20 @@ func playerViewToLua(state *lua.LState, value player.PlayerView, arrays map[*lua
 	return entry
 }
 
-func newGameModule(ctx context.Context, state *lua.LState, service *game.QueryService, arrays map[*lua.LTable]struct{}) *lua.LUserData {
+func newGameModule(ctx context.Context, state *lua.LState, service *game.QueryService, arrays map[*lua.LTable]struct{}, references *executionReferences) *lua.LUserData {
 	backing := state.NewTable()
 	backing.RawSetString("list", state.NewFunction(func(state *lua.LState) int {
 		filter, err := matchFilterFromLua(state, "game.list")
 		if err != nil {
+			state.RaiseError("%v", err)
+			return 0
+		}
+		cacheKey := "game.list/" + matchFilterCacheKey(filter)
+		if cached, exists := references.cache[cacheKey]; exists {
+			state.Push(cached)
+			return 1
+		}
+		if err := references.reserveRead(); err != nil {
 			state.RaiseError("%v", err)
 			return 0
 		}
@@ -145,37 +188,104 @@ func newGameModule(ctx context.Context, state *lua.LState, service *game.QuerySe
 			state.RaiseError("list matches: %v", err)
 			return 0
 		}
-		result := state.NewTable()
-		arrays[result] = struct{}{}
-		for _, value := range values {
-			result.Append(matchViewProjectionToLua(state, value))
-		}
-		state.Push(result)
-		return 1
-	}))
-	backing.RawSetString("summaries", state.NewFunction(func(state *lua.LState) int {
-		filter, err := matchFilterFromLua(state, "game.summaries")
-		if err != nil {
+		if err := references.consumeItems(len(values)); err != nil {
 			state.RaiseError("%v", err)
 			return 0
 		}
-		values, err := service.SummarizeMatches(ctx, filter)
-		if err != nil {
-			state.RaiseError("summarize matches: %v", err)
-			return 0
-		}
 		result := state.NewTable()
 		arrays[result] = struct{}{}
 		for _, value := range values {
-			result.Append(matchSummaryToLua(state, value))
+			entry := matchViewProjectionToLua(state, value)
+			references.matches[entry] = value.ID
+			result.Append(entry)
 		}
+		references.cache[cacheKey] = result
 		state.Push(result)
 		return 1
 	}))
-	backing.RawSetString("records", state.NewFunction(gameRecordsFunction(ctx, state, service, arrays)))
-	backing.RawSetString("lineups", state.NewFunction(gameLineupsFunction(ctx, state, service, arrays)))
-	backing.RawSetString("performances", state.NewFunction(gamePerformancesFunction(ctx, state, service, arrays)))
+	backing.RawSetString("plays", state.NewFunction(gamePlaysFunction(ctx, state, service, arrays, references)))
 	return readOnlyProxy(state, "game", backing)
+}
+
+func gamePlaysFunction(ctx context.Context, state *lua.LState, service *game.QueryService, arrays map[*lua.LTable]struct{}, references *executionReferences) lua.LGFunction {
+	return func(state *lua.LState) int {
+		if state.GetTop() != 1 {
+			state.RaiseError("game.plays requires one filter table")
+			return 0
+		}
+		matches, ok := state.CheckTable(1).RawGetString("matches").(*lua.LTable)
+		if !ok {
+			state.RaiseError("game.plays requires matches from game.list")
+			return 0
+		}
+		ids := make([]game.MatchID, 0, matches.Len())
+		seen := make(map[game.MatchID]struct{})
+		var resolveErr error
+		matches.ForEach(func(_ lua.LValue, value lua.LValue) {
+			entry, ok := value.(*lua.LTable)
+			if !ok {
+				resolveErr = errors.New("game.plays matches must contain game.list entries")
+				return
+			}
+			id, exists := references.matches[entry]
+			if !exists {
+				resolveErr = errors.New("game.plays received an unrecognized match reference")
+				return
+			}
+			if _, exists := seen[id]; !exists {
+				seen[id] = struct{}{}
+				ids = append(ids, id)
+			}
+		})
+		if resolveErr != nil || len(ids) == 0 {
+			if resolveErr == nil {
+				resolveErr = errors.New("game.plays requires at least one match reference")
+			}
+			state.RaiseError("%v", resolveErr)
+			return 0
+		}
+		keys := make([]string, len(ids))
+		for index, id := range ids {
+			keys[index] = string(id)
+		}
+		cacheKey := "game.plays/" + strings.Join(keys, ",")
+		if cached, exists := references.cache[cacheKey]; exists {
+			state.Push(cached)
+			return 1
+		}
+		if err := references.reserveRead(); err != nil {
+			state.RaiseError("%v", err)
+			return 0
+		}
+		values, err := service.ListPlays(ctx, ids)
+		if err != nil {
+			state.RaiseError("list plays: %v", err)
+			return 0
+		}
+		if err := references.consumeItems(len(values)); err != nil {
+			state.RaiseError("%v", err)
+			return 0
+		}
+		out := state.NewTable()
+		arrays[out] = struct{}{}
+		for _, value := range values {
+			out.Append(playEventToLua(state, value))
+		}
+		references.cache[cacheKey] = out
+		state.Push(out)
+		return 1
+	}
+}
+
+func matchFilterCacheKey(filter game.MatchFilter) string {
+	from, to := "", ""
+	if filter.ScheduledFrom != nil {
+		from = filter.ScheduledFrom.Format(time.RFC3339Nano)
+	}
+	if filter.ScheduledTo != nil {
+		to = filter.ScheduledTo.Format(time.RFC3339Nano)
+	}
+	return strings.Join(filter.ParticipantNames, "\x00") + "/" + from + "/" + to + fmt.Sprintf("/%d", filter.Limit)
 }
 
 func gameRecordsFunction(ctx context.Context, state *lua.LState, service *game.QueryService, arrays map[*lua.LTable]struct{}) lua.LGFunction {
@@ -380,7 +490,7 @@ func matchFilterFromLua(state *lua.LState, call string) (game.MatchFilter, error
 		return game.MatchFilter{}, nil
 	}
 	table := state.CheckTable(1)
-	filter := game.MatchFilter{}
+	filter := game.MatchFilter{Limit: 100}
 	if value := table.RawGetString("participant_names"); value != lua.LNil {
 		values, ok := value.(*lua.LTable)
 		if !ok {
@@ -426,12 +536,30 @@ func matchFilterFromLua(state *lua.LState, call string) (game.MatchFilter, error
 	}
 	if value := table.RawGetString("limit"); value != lua.LNil {
 		number, ok := value.(lua.LNumber)
-		if !ok || number != lua.LNumber(math.Trunc(float64(number))) || number < 0 {
-			return filter, fmt.Errorf("%s limit must be a non-negative integer", call)
+		if !ok || number != lua.LNumber(math.Trunc(float64(number))) || number <= 0 || number > 500 {
+			return filter, fmt.Errorf("%s limit must be an integer from 1 to 500", call)
 		}
 		filter.Limit = int(number)
 	}
 	return filter, nil
+}
+
+func playEventToLua(state *lua.LState, value game.PlayEventView) *lua.LTable {
+	result := state.NewTable()
+	result.RawSetString("sequence", lua.LNumber(value.Sequence))
+	result.RawSetString("inning", lua.LNumber(value.Inning))
+	result.RawSetString("half", lua.LString(halfName(value.Half)))
+	result.RawSetString("batting_order", lua.LNumber(value.BattingOrder))
+	result.RawSetString("batter", identityToLua(state, value.Batter))
+	result.RawSetString("starting_pitcher", identityToLua(state, value.StartingPitcher))
+	result.RawSetString("batting_result", lua.LNumber(value.BattingResult))
+	result.RawSetString("result_description", lua.LString(value.ResultDescription))
+	situation := state.NewTable()
+	situation.RawSetString("outs", lua.LNumber(value.Situation.Outs))
+	situation.RawSetString("home_score", lua.LNumber(value.Situation.HomeScore))
+	situation.RawSetString("away_score", lua.LNumber(value.Situation.AwayScore))
+	result.RawSetString("situation", situation)
+	return result
 }
 
 func matchViewProjectionToLua(state *lua.LState, value game.MatchView) *lua.LTable {

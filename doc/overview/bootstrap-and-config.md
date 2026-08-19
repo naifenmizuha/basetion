@@ -11,6 +11,6 @@
 
 ## 组合根
 
-`bootstrap.Execute` 提取 `--profile run|dev`，初始化配置和 Eino 中文语言，连接选定 profile 的 PostgreSQL，然后组装文件 Session 存储、球队/球员/比赛/训练领域服务、Lua Team Query Executor、Team Query/Modify 工具、模型、Harness 和会话服务。Player 查询服务从 PostgreSQL 的姓名化 Reader 构造，Game 查询服务直接使用 Store 的五类只读投影。
+`bootstrap.Execute` 提取 `--profile run|dev`，初始化配置和 Eino 中文语言，连接选定 profile 的 PostgreSQL，然后组装文件 Session 存储、球队/球员/比赛/训练领域服务、Lua Team Query Executor、Team Fetch/Query/Modify 工具、模型、Harness 和会话服务。Player 查询服务从 PostgreSQL 的姓名化 Reader 构造；Game 查询服务直接使用 Store 的组合投影和按内部比赛引用批量读取 Play 的基础投影。
 
 组合根不创建数据库、执行迁移、重置数据或生成 sqlc 代码；这些动作由显式 Just 配方完成。任一初始化失败都会按阶段输出错误并返回非零退出码，连接池在进程结束时关闭。

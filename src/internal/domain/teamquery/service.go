@@ -9,13 +9,7 @@ import (
 
 const MaxProgramBytes = 32 * 1024
 
-var (
-	ErrUnknownModule     = errors.New("unknown team query module")
-	ErrModuleUnavailable = errors.New("team query module is not available")
-)
-
 type Query struct {
-	Modules []string
 	Program string
 }
 
@@ -74,11 +68,6 @@ type Description struct {
 	Topics []TopicDescription `json:"topics"`
 }
 
-type module struct {
-	name      string
-	available bool
-}
-
 type topic struct {
 	name            string
 	kind            string
@@ -95,7 +84,6 @@ type topic struct {
 // Service owns the stable model-facing team query contract.
 type Service struct {
 	executor        Executor
-	modules         []module
 	topics          map[string]topic
 	availableTopics map[string]struct{}
 	rootTopics      []string
@@ -105,22 +93,17 @@ func NewService(executor Executor) (*Service, error) {
 	if executor == nil {
 		return nil, errors.New("team query executor is required")
 	}
-	availableModules := make(map[string]struct{})
-	for _, name := range executor.AvailableModules() {
-		availableModules[name] = struct{}{}
-	}
-	modules := []module{{name: "team"}, {name: "player"}, {name: "game"}}
-	for index := range modules {
-		_, modules[index].available = availableModules[modules[index].name]
-	}
 	availableTopics := make(map[string]struct{})
 	for _, name := range executor.AvailableTopics() {
 		availableTopics[name] = struct{}{}
 	}
+	topics := defaultTopics()
+	for _, name := range []string{"game.summaries", "game.records", "game.lineups", "game.performances"} {
+		delete(topics, name)
+	}
 	return &Service{
 		executor:        executor,
-		modules:         modules,
-		topics:          defaultTopics(),
+		topics:          topics,
 		availableTopics: availableTopics,
 		rootTopics:      []string{"runtime", "team", "player", "game"},
 	}, nil
@@ -150,7 +133,7 @@ func (s *Service) Describe(ctx context.Context, requested []string) (Description
 	return Description{Topics: result}, nil
 }
 
-func (s *Service) Query(ctx context.Context, modules []string, program string) (any, error) {
+func (s *Service) Query(ctx context.Context, program string) (any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -161,43 +144,11 @@ func (s *Service) Query(ctx context.Context, modules []string, program string) (
 	if program == "" {
 		return nil, errors.New("team query program is required")
 	}
-	selected, err := s.selectModules(modules)
-	if err != nil {
-		return nil, err
-	}
-	result, err := s.executor.Execute(ctx, Query{Modules: selected, Program: program})
+	result, err := s.executor.Execute(ctx, Query{Program: program})
 	if err != nil {
 		return nil, fmt.Errorf("execute team query: %w", err)
 	}
 	return result, nil
-}
-
-func (s *Service) selectModules(requested []string) ([]string, error) {
-	if len(requested) == 0 {
-		return nil, nil
-	}
-	known := make(map[string]module, len(s.modules))
-	for _, value := range s.modules {
-		known[value.name] = value
-	}
-	selected := make([]string, 0, len(requested))
-	seen := make(map[string]struct{}, len(requested))
-	for _, raw := range requested {
-		name := strings.TrimSpace(raw)
-		value, exists := known[name]
-		if !exists {
-			return nil, fmt.Errorf("%w: %q", ErrUnknownModule, name)
-		}
-		if !value.available {
-			return nil, fmt.Errorf("%w: %s", ErrModuleUnavailable, name)
-		}
-		if _, exists := seen[name]; exists {
-			continue
-		}
-		seen[name] = struct{}{}
-		selected = append(selected, name)
-	}
-	return selected, nil
 }
 
 func (s *Service) describeRootTopic(name string) TopicDescription {
@@ -248,24 +199,12 @@ func (s *Service) topicAvailable(definition topic) bool {
 		}
 		return false
 	}
-	for _, required := range definition.requiresModules {
-		found := false
-		for _, candidate := range s.modules {
-			if candidate.name == required {
-				found = candidate.available
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
 	_, available := s.availableTopics[definition.name]
 	return available
 }
 
 func defaultRuntimeDescription() RuntimeDescription {
-	return RuntimeDescription{Language: "lua", Version: "5.1", Entrypoint: "main(team)", ReadOnly: true, Libraries: []string{"safe-base", "table", "string", "math"}, SourceLimit: MaxProgramBytes, ResultLimit: 256 * 1024, ExecutionTip: "先 describe 所需 topic，再提交只读 Lua 查询。"}
+	return RuntimeDescription{Language: "lua", Version: "5.1", Entrypoint: "main(data)", ReadOnly: true, Libraries: []string{"safe-base", "table", "string", "math"}, SourceLimit: MaxProgramBytes, ResultLimit: 256 * 1024, ExecutionTip: "先 describe 基础 topic；Lua 可根据实际比赛对象动态批量读取 Play。"}
 }
 
 func field(name, typ string, required bool, description string, values ...string) TopicFieldDescription {
@@ -297,11 +236,12 @@ func defaultTopics() map[string]topic {
 	return map[string]topic{
 		"runtime":           {name: "runtime", kind: "runtime", summary: "受限 Lua 5.1 运行时、入口函数与资源限制。"},
 		"team":              {name: "team", kind: "module", summary: "球队读取。", requiresModules: []string{"team"}, children: []string{"team.list"}},
-		"team.list":         {name: "team.list", kind: "command", summary: "列出球队，可选只返回活跃球队。", requiresModules: []string{"team"}, call: "team.team.list({active=true})", parameters: []TopicFieldDescription{field("active", "boolean", false, "true 时仅返回活跃球队。")}, resultType: "array<team>", returns: teamFields, example: "function main(team) return team.team.list({active = true}) end"},
+		"team.list":         {name: "team.list", kind: "command", summary: "列出球队，可选只返回活跃球队。", requiresModules: []string{"team"}, call: "data.team.list({active=true})", parameters: []TopicFieldDescription{field("active", "boolean", false, "true 时仅返回活跃球队。")}, resultType: "array<team>", returns: teamFields, example: "function main(data) return data.team.list({active = true}) end"},
 		"player":            {name: "player", kind: "module", summary: "当前球员读取。", requiresModules: []string{"player"}, children: []string{"player.list"}},
-		"player.list":       {name: "player.list", kind: "command", summary: "按球队名称、背号和任一守备位置查询当前球员。", requiresModules: []string{"player"}, call: "team.player.list({team_name=..., jersey_number=..., position_any={...}})", parameters: []TopicFieldDescription{field("team_name", "string", false, "精确球队名称。"), field("jersey_number", "integer", false, "0 到 99 的背号。"), arrayField("position_any", false, "匹配任一守备位置。", field("item", "string", true, "守备位置。", positions...))}, resultType: "array<player>", returns: playerFields, example: "function main(team) return team.player.list({team_name = \"蜀汉队\"}) end"},
-		"game":              {name: "game", kind: "module", summary: "比赛目录、摘要、记录、阵容和表现读取。", requiresModules: []string{"game"}, children: []string{"game.list", "game.summaries", "game.records", "game.lineups", "game.performances"}},
-		"game.list":         {name: "game.list", kind: "command", summary: "读取比赛目录。", requiresModules: []string{"game"}, call: "team.game.list({participant_names={...}, date_from=..., date_to=..., limit=...})", parameters: matchFilter, resultType: "array<match>", returns: matchFields, example: "function main(team) return team.game.list({participant_names = {\"蜀汉队\"}}) end"},
+		"player.list":       {name: "player.list", kind: "command", summary: "按球队名称、背号和任一守备位置查询当前球员。", requiresModules: []string{"player"}, call: "data.player.list({team_name=..., jersey_number=..., position_any={...}})", parameters: []TopicFieldDescription{field("team_name", "string", false, "精确球队名称。"), field("jersey_number", "integer", false, "0 到 99 的背号。"), arrayField("position_any", false, "匹配任一守备位置。", field("item", "string", true, "守备位置。", positions...))}, resultType: "array<player>", returns: playerFields, example: "function main(data) return data.player.list({team_name = \"蜀汉队\"}) end"},
+		"game":              {name: "game", kind: "module", summary: "比赛基础对象与逐场 Play 读取。", requiresModules: []string{"game"}, children: []string{"game.list", "game.plays"}},
+		"game.list":         {name: "game.list", kind: "command", summary: "读取比赛基础对象；结果可作为 game.plays 的不透明输入。", requiresModules: []string{"game"}, call: "data.game.list({participant_names={...}, date_from=..., date_to=..., limit=...})", parameters: matchFilter, resultType: "array<match>", returns: matchFields, example: "function main(data) return data.game.list({participant_names = {\"蜀汉队\"}}) end"},
+		"game.plays":        {name: "game.plays", kind: "command", summary: "按 game.list 返回的原始比赛对象批量读取原子 Play；不会暴露稳定 ID。", requiresModules: []string{"game"}, call: "data.game.plays({matches={match_object,...}})", parameters: []TopicFieldDescription{arrayField("matches", true, "由同一次执行的 game.list 返回并原样保留的比赛对象。", TopicFieldDescription{Name: "item", Type: "match", Required: true, Description: "不透明比赛引用。"})}, resultType: "array<play>", returns: []TopicFieldDescription{field("sequence", "number", true, "比赛内 Play 顺序。"), field("inning", "number", true, "局数。"), field("half", "string", true, "上下半局。", "top", "bottom"), objectField("batter", true, "打者身份。", identityFields...), objectField("starting_pitcher", true, "开局投手身份。", identityFields...), objectField("situation", true, "Play 结束局面。", situationFields...), field("batting_result", "number", true, "打击结果枚举。"), field("result_description", "string", true, "结果说明。")}, example: "function main(data) local matches=data.game.list({limit=10}); return data.game.plays({matches=matches}) end"},
 		"game.summaries":    {name: "game.summaries", kind: "command", summary: "读取包含比分和赛果的比赛摘要。", requiresModules: []string{"game"}, call: "team.game.summaries({participant_names={...}, date_from=..., date_to=..., limit=...})", parameters: matchFilter, resultType: "array<match_summary>", returns: matchSummaryFields, example: "function main(team) return team.game.summaries({}) end"},
 		"game.records":      {name: "game.records", kind: "command", summary: "读取姓名化的完整比赛记录。", requiresModules: []string{"game"}, call: "team.game.records({participant_names={...}, date_from=..., date_to=..., limit=...})", parameters: matchFilter, resultType: "array<match_record>", returns: []TopicFieldDescription{objectField("summary", true, "比赛摘要。", matchSummaryFields...), arrayField("events", true, "按顺序排列的比赛事件。", TopicFieldDescription{Name: "item", Type: "object", Required: true, Description: "比赛事件。", Fields: eventFields})}, example: "function main(team) return team.game.records({}) end"},
 		"game.lineups":      {name: "game.lineups", kind: "command", summary: "读取比赛阵容。", requiresModules: []string{"game"}, call: "team.game.lineups({participant_names={...}, date_from=..., date_to=..., limit=...})", parameters: matchFilter, resultType: "array<match_lineups>", returns: []TopicFieldDescription{objectField("match", true, "比赛目录。", matchFields...), arrayField("lineups", true, "比赛阵容。", TopicFieldDescription{Name: "item", Type: "object", Required: true, Description: "阵容。", Fields: lineupFields})}, example: "function main(team) return team.game.lineups({}) end"},

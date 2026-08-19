@@ -15,10 +15,9 @@ import (
 const TeamQueryToolName = "team_query"
 
 type teamQueryInput struct {
-	Mode    string    `json:"mode" jsonschema:"required,description=操作模式：describe 按需加载帮助 topic，query 执行受限 Lua 5.1 查询,enum=describe,enum=query"`
+	Mode    string    `json:"mode" jsonschema:"required,description=操作模式：describe 按需加载基础数据帮助 topic，query 执行受限 Lua 5.1 查询,enum=describe,enum=query"`
 	Topics  *[]string `json:"topics,omitempty" jsonschema:"description=仅 describe 使用：要读取的精确帮助 topic，可批量提供；省略时返回顶层目录"`
-	Modules *[]string `json:"modules,omitempty" jsonschema:"description=仅 query 使用：本次查询需要注入的能力模块名称；省略时仅运行纯 Lua"`
-	Program *string   `json:"program,omitempty" jsonschema:"description=仅 query 使用：必填的 Lua 5.1 程序，必须定义 main(team)"`
+	Program *string   `json:"program,omitempty" jsonschema:"description=仅 query 使用：必填的 Lua 5.1 程序，必须定义 main(data)"`
 }
 
 type teamQueryOutput struct {
@@ -35,13 +34,10 @@ func NewTeamQuery(service *domain.Service) (tool.InvokableTool, error) {
 	}
 	return toolutils.InferTool(
 		TeamQueryToolName,
-		"发现并查询球队、当前球员与比赛的只读数据。先用 describe 获取顶层目录或按需加载帮助 topic；再用 query 执行定义了 main(team) 的受限 Lua 5.1 程序。该工具不能修改任何球队数据。",
+		"执行基于球队、球员、比赛和原子 Play 的只读 Lua 查询。先用 describe 获取基础 topic；再用 query 执行定义了 main(data) 的 Lua 5.1 程序。Lua 可根据实际筛选出的比赛对象批量读取 Play，不会得到内部 ID。比赛摘要、完整记录、阵容和球员表现请使用 team_fetch。该工具不能修改任何球队数据。",
 		func(ctx context.Context, input teamQueryInput) (teamQueryOutput, error) {
 			switch strings.TrimSpace(input.Mode) {
 			case "describe":
-				if input.Modules != nil {
-					return teamQueryOutput{}, errors.New("team_query describe does not accept modules; use topics")
-				}
 				if input.Program != nil {
 					return teamQueryOutput{}, errors.New("team_query describe does not accept program")
 				}
@@ -55,9 +51,9 @@ func NewTeamQuery(service *domain.Service) (tool.InvokableTool, error) {
 				}, nil
 			case "query":
 				if input.Topics != nil {
-					return teamQueryOutput{}, errors.New("team_query query does not accept topics; use modules")
+					return teamQueryOutput{}, errors.New("team_query query does not accept topics")
 				}
-				result, err := service.Query(ctx, stringSlice(input.Modules), stringValue(input.Program))
+				result, err := service.Query(ctx, stringValue(input.Program))
 				if err != nil {
 					return teamQueryOutput{}, err
 				}

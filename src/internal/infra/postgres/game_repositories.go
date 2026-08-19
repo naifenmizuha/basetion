@@ -183,7 +183,36 @@ func (s *Store) selectedMatchViews(ctx context.Context, filter game.MatchFilter)
 	}
 	values := make([]selectedMatch, 0, len(rows))
 	for _, row := range rows {
-		values = append(values, selectedMatch{id: row.MID, view: game.MatchView{ScheduledAt: requiredTimestamp(row.ScheduledAt), HomeTeamName: row.HomeTeamName, AwayTeamName: row.AwayTeamName, Location: row.Location, Status: game.MatchStatus(row.Status)}})
+		values = append(values, selectedMatch{id: row.MID, view: game.MatchView{ID: game.MatchID(row.MID), ScheduledAt: requiredTimestamp(row.ScheduledAt), HomeTeamName: row.HomeTeamName, AwayTeamName: row.AwayTeamName, Location: row.Location, Status: game.MatchStatus(row.Status)}})
+	}
+	return values, nil
+}
+
+// ListPlays returns the atomic play projection for already selected matches.
+// The match identifiers are internal query references and are never exposed by
+// model-facing adapters.
+func (s *Store) ListPlays(ctx context.Context, matchIDs []game.MatchID) ([]game.PlayEventView, error) {
+	ids := make([]string, len(matchIDs))
+	for index, id := range matchIDs {
+		ids[index] = string(id)
+	}
+	rows, err := s.queryExecutor().ListMatchRecordEvents(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("list plays: %w", err)
+	}
+	values := make([]game.PlayEventView, 0, len(rows))
+	for _, row := range rows {
+		values = append(values, game.PlayEventView{
+			Sequence:          uint32(row.Sequence),
+			Inning:            uint16(row.Inning),
+			Half:              game.Half(row.Half),
+			BattingOrder:      uint8(row.BattingOrder),
+			Batter:            game.PlayerIdentityView{Name: row.BatterName, TeamName: row.BatterTeamName, JerseyNumber: uint8(row.BatterJerseyNumber)},
+			StartingPitcher:   game.PlayerIdentityView{Name: row.PitcherName, TeamName: row.PitcherTeamName, JerseyNumber: uint8(row.PitcherJerseyNumber)},
+			Situation:         game.SituationView{Outs: uint8(row.AfterOuts), HomeScore: uint16(row.AfterHomeScore), AwayScore: uint16(row.AfterAwayScore)},
+			BattingResult:     game.BattingResult(row.BattingResult),
+			ResultDescription: row.ResultDescription,
+		})
 	}
 	return values, nil
 }

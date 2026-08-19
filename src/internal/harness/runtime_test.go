@@ -216,7 +216,7 @@ func TestRuntimeUsesTeamQueryTool(t *testing.T) {
 		{assistantMessage(schema.NewContentBlockChunk(&schema.FunctionToolCall{
 			CallID:    "team-query-call",
 			Name:      basetiontools.TeamQueryToolName,
-			Arguments: `{"mode":"query","program":"function main(team) return {total = 6 + 7} end"}`,
+			Arguments: `{"mode":"query","program":"function main(data) return {total = 6 + 7} end"}`,
 		}, &schema.StreamingMeta{Index: 0}))},
 		{assistantMessage(schema.NewContentBlockChunk(&schema.AssistantGenText{Text: "结果是 13。"}, &schema.StreamingMeta{Index: 0}))},
 	}}
@@ -232,7 +232,7 @@ func TestRuntimeUsesTeamQueryTool(t *testing.T) {
 	for _, message := range messages {
 		for _, block := range message.ContentBlocks {
 			if result := block.FunctionToolResult; result != nil {
-				sawSkillResult = sawSkillResult || result.Name == "skill" && result.CallID == "skill-call" && strings.Contains(result.Content[0].String(), "一次调用 `team_query` 的 `describe`")
+				sawSkillResult = sawSkillResult || result.Name == "skill" && result.CallID == "skill-call" && strings.Contains(result.Content[0].String(), "调用相应工具的 `describe`")
 				sawTeamQueryResult = sawTeamQueryResult || result.Name == basetiontools.TeamQueryToolName && result.CallID == "team-query-call" && strings.Contains(result.Content[0].String(), `"total":13`)
 			}
 		}
