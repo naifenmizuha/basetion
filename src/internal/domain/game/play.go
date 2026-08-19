@@ -22,9 +22,8 @@ const (
 )
 
 var (
-	ErrPlayNotFound        = errors.New("play not found")
-	ErrPlayVersionConflict = errors.New("play version conflict")
-	ErrCorruptedPlay       = errors.New("corrupted play data")
+	ErrPlayNotFound  = errors.New("play not found")
+	ErrCorruptedPlay = errors.New("corrupted play data")
 )
 
 type Situation struct {
@@ -85,7 +84,6 @@ type Pitch struct {
 	Velocity      *float64
 	Zone          *uint8
 	Description   string
-	Version       uint64
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 	DeletedAt     *time.Time
@@ -100,18 +98,18 @@ func NewPitch(id PitchID, sequence int, pitcherID, batterID player.ID, result Pi
 		value := uint8(*zone)
 		convertedZone = &value
 	}
-	return restorePitch(id, sequence, pitcherID, batterID, result, ballsBefore, strikesBefore, ballsAfter, strikesAfter, pitchType, velocity, convertedZone, description, 1, now, now, nil)
+	return restorePitch(id, sequence, pitcherID, batterID, result, ballsBefore, strikesBefore, ballsAfter, strikesAfter, pitchType, velocity, convertedZone, description, now, now, nil)
 }
 
-func RestorePitch(id PitchID, sequence int, pitcherID, batterID player.ID, result PitchResult, ballsBefore, strikesBefore, ballsAfter, strikesAfter int, pitchType string, velocity *float64, zone *uint8, description string, version uint64, createdAt, updatedAt time.Time, deletedAt *time.Time) (Pitch, error) {
-	v, err := restorePitch(id, sequence, pitcherID, batterID, result, ballsBefore, strikesBefore, ballsAfter, strikesAfter, pitchType, velocity, zone, description, version, createdAt, updatedAt, deletedAt)
+func RestorePitch(id PitchID, sequence int, pitcherID, batterID player.ID, result PitchResult, ballsBefore, strikesBefore, ballsAfter, strikesAfter int, pitchType string, velocity *float64, zone *uint8, description string, createdAt, updatedAt time.Time, deletedAt *time.Time) (Pitch, error) {
+	v, err := restorePitch(id, sequence, pitcherID, batterID, result, ballsBefore, strikesBefore, ballsAfter, strikesAfter, pitchType, velocity, zone, description, createdAt, updatedAt, deletedAt)
 	if err != nil {
 		return Pitch{}, fmt.Errorf("%w: %v", ErrCorruptedPlay, err)
 	}
 	return v, nil
 }
 
-func restorePitch(id PitchID, sequence int, pitcherID, batterID player.ID, result PitchResult, ballsBefore, strikesBefore, ballsAfter, strikesAfter int, pitchType string, velocity *float64, zone *uint8, description string, version uint64, createdAt, updatedAt time.Time, deletedAt *time.Time) (Pitch, error) {
+func restorePitch(id PitchID, sequence int, pitcherID, batterID player.ID, result PitchResult, ballsBefore, strikesBefore, ballsAfter, strikesAfter int, pitchType string, velocity *float64, zone *uint8, description string, createdAt, updatedAt time.Time, deletedAt *time.Time) (Pitch, error) {
 	description = strings.TrimSpace(description)
 	if id == "" || pitcherID == "" || batterID == "" {
 		return Pitch{}, errors.New("pitch id, pitcher and batter are required")
@@ -125,10 +123,10 @@ func restorePitch(id PitchID, sequence int, pitcherID, batterID player.ID, resul
 	if velocity != nil && *velocity < 0 {
 		return Pitch{}, errors.New("pitch velocity must not be negative")
 	}
-	if version == 0 || createdAt.IsZero() || updatedAt.Before(createdAt) || deletedAt != nil && deletedAt.Before(createdAt) {
+	if createdAt.IsZero() || updatedAt.Before(createdAt) || deletedAt != nil && deletedAt.Before(createdAt) {
 		return Pitch{}, errors.New("invalid pitch lifecycle")
 	}
-	return Pitch{ID: id, Sequence: uint16(sequence), PitcherID: pitcherID, BatterID: batterID, Result: result, BallsBefore: uint8(ballsBefore), StrikesBefore: uint8(strikesBefore), BallsAfter: uint8(ballsAfter), StrikesAfter: uint8(strikesAfter), PitchType: strings.TrimSpace(pitchType), Velocity: copyFloat(velocity), Zone: copyUint8(zone), Description: description, Version: version, CreatedAt: createdAt, UpdatedAt: updatedAt, DeletedAt: copyTime(deletedAt)}, nil
+	return Pitch{ID: id, Sequence: uint16(sequence), PitcherID: pitcherID, BatterID: batterID, Result: result, BallsBefore: uint8(ballsBefore), StrikesBefore: uint8(strikesBefore), BallsAfter: uint8(ballsAfter), StrikesAfter: uint8(strikesAfter), PitchType: strings.TrimSpace(pitchType), Velocity: copyFloat(velocity), Zone: copyUint8(zone), Description: description, CreatedAt: createdAt, UpdatedAt: updatedAt, DeletedAt: copyTime(deletedAt)}, nil
 }
 
 type BattingResult uint8
@@ -182,25 +180,24 @@ type RunnerOutcome struct {
 	Earned           *bool
 	RBIBatterID      *player.ID
 	Description      string
-	Version          uint64
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	DeletedAt        *time.Time
 }
 
 func NewRunnerOutcome(id RunnerResultID, sequence int, runnerID player.ID, result RunnerResult, fromBase int, toBase *int, outRecorded, scored bool, chargedPitcherID *player.ID, earned *bool, rbiBatterID *player.ID, description string, now time.Time) (RunnerOutcome, error) {
-	return restoreRunnerOutcome(id, sequence, runnerID, result, fromBase, toBase, outRecorded, scored, chargedPitcherID, earned, rbiBatterID, description, 1, now, now, nil)
+	return restoreRunnerOutcome(id, sequence, runnerID, result, fromBase, toBase, outRecorded, scored, chargedPitcherID, earned, rbiBatterID, description, now, now, nil)
 }
 
-func RestoreRunnerOutcome(id RunnerResultID, sequence int, runnerID player.ID, result RunnerResult, fromBase int, toBase *int, outRecorded, scored bool, chargedPitcherID *player.ID, earned *bool, rbiBatterID *player.ID, description string, version uint64, createdAt, updatedAt time.Time, deletedAt *time.Time) (RunnerOutcome, error) {
-	v, err := restoreRunnerOutcome(id, sequence, runnerID, result, fromBase, toBase, outRecorded, scored, chargedPitcherID, earned, rbiBatterID, description, version, createdAt, updatedAt, deletedAt)
+func RestoreRunnerOutcome(id RunnerResultID, sequence int, runnerID player.ID, result RunnerResult, fromBase int, toBase *int, outRecorded, scored bool, chargedPitcherID *player.ID, earned *bool, rbiBatterID *player.ID, description string, createdAt, updatedAt time.Time, deletedAt *time.Time) (RunnerOutcome, error) {
+	v, err := restoreRunnerOutcome(id, sequence, runnerID, result, fromBase, toBase, outRecorded, scored, chargedPitcherID, earned, rbiBatterID, description, createdAt, updatedAt, deletedAt)
 	if err != nil {
 		return RunnerOutcome{}, fmt.Errorf("%w: %v", ErrCorruptedPlay, err)
 	}
 	return v, nil
 }
 
-func restoreRunnerOutcome(id RunnerResultID, sequence int, runnerID player.ID, result RunnerResult, fromBase int, toBase *int, outRecorded, scored bool, chargedPitcherID *player.ID, earned *bool, rbiBatterID *player.ID, description string, version uint64, createdAt, updatedAt time.Time, deletedAt *time.Time) (RunnerOutcome, error) {
+func restoreRunnerOutcome(id RunnerResultID, sequence int, runnerID player.ID, result RunnerResult, fromBase int, toBase *int, outRecorded, scored bool, chargedPitcherID *player.ID, earned *bool, rbiBatterID *player.ID, description string, createdAt, updatedAt time.Time, deletedAt *time.Time) (RunnerOutcome, error) {
 	if id == "" || runnerID == "" || sequence < 1 || sequence > 65535 || !result.Valid() || fromBase < 0 || fromBase > 3 {
 		return RunnerOutcome{}, errors.New("invalid runner result identity or position")
 	}
@@ -215,10 +212,10 @@ func restoreRunnerOutcome(id RunnerResultID, sequence int, runnerID player.ID, r
 	if scored != (result == RunnerScore) || scored && target != nil && *target != 4 || scored && (chargedPitcherID == nil || earned == nil) {
 		return RunnerOutcome{}, errors.New("inconsistent runner scoring result")
 	}
-	if version == 0 || createdAt.IsZero() || updatedAt.Before(createdAt) || deletedAt != nil && deletedAt.Before(createdAt) {
+	if createdAt.IsZero() || updatedAt.Before(createdAt) || deletedAt != nil && deletedAt.Before(createdAt) {
 		return RunnerOutcome{}, errors.New("invalid runner result lifecycle")
 	}
-	return RunnerOutcome{ID: id, Sequence: uint16(sequence), RunnerID: runnerID, Result: result, FromBase: uint8(fromBase), ToBase: target, OutRecorded: outRecorded, Scored: scored, ChargedPitcherID: copyPlayer(chargedPitcherID), Earned: copyBool(earned), RBIBatterID: copyPlayer(rbiBatterID), Description: strings.TrimSpace(description), Version: version, CreatedAt: createdAt, UpdatedAt: updatedAt, DeletedAt: copyTime(deletedAt)}, nil
+	return RunnerOutcome{ID: id, Sequence: uint16(sequence), RunnerID: runnerID, Result: result, FromBase: uint8(fromBase), ToBase: target, OutRecorded: outRecorded, Scored: scored, ChargedPitcherID: copyPlayer(chargedPitcherID), Earned: copyBool(earned), RBIBatterID: copyPlayer(rbiBatterID), Description: strings.TrimSpace(description), CreatedAt: createdAt, UpdatedAt: updatedAt, DeletedAt: copyTime(deletedAt)}, nil
 }
 
 type FieldingResult uint8
@@ -243,32 +240,31 @@ type FieldingOutcome struct {
 	Position    player.PositionFlags
 	Result      FieldingResult
 	Description string
-	Version     uint64
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	DeletedAt   *time.Time
 }
 
 func NewFieldingOutcome(id FieldingResultID, sequence int, fielderID player.ID, position player.PositionFlags, result FieldingResult, description string, now time.Time) (FieldingOutcome, error) {
-	return restoreFieldingOutcome(id, sequence, fielderID, position, result, description, 1, now, now, nil)
+	return restoreFieldingOutcome(id, sequence, fielderID, position, result, description, now, now, nil)
 }
 
-func RestoreFieldingOutcome(id FieldingResultID, sequence int, fielderID player.ID, position player.PositionFlags, result FieldingResult, description string, version uint64, createdAt, updatedAt time.Time, deletedAt *time.Time) (FieldingOutcome, error) {
-	v, err := restoreFieldingOutcome(id, sequence, fielderID, position, result, description, version, createdAt, updatedAt, deletedAt)
+func RestoreFieldingOutcome(id FieldingResultID, sequence int, fielderID player.ID, position player.PositionFlags, result FieldingResult, description string, createdAt, updatedAt time.Time, deletedAt *time.Time) (FieldingOutcome, error) {
+	v, err := restoreFieldingOutcome(id, sequence, fielderID, position, result, description, createdAt, updatedAt, deletedAt)
 	if err != nil {
 		return FieldingOutcome{}, fmt.Errorf("%w: %v", ErrCorruptedPlay, err)
 	}
 	return v, nil
 }
 
-func restoreFieldingOutcome(id FieldingResultID, sequence int, fielderID player.ID, position player.PositionFlags, result FieldingResult, description string, version uint64, createdAt, updatedAt time.Time, deletedAt *time.Time) (FieldingOutcome, error) {
+func restoreFieldingOutcome(id FieldingResultID, sequence int, fielderID player.ID, position player.PositionFlags, result FieldingResult, description string, createdAt, updatedAt time.Time, deletedAt *time.Time) (FieldingOutcome, error) {
 	if id == "" || fielderID == "" || sequence < 1 || sequence > 65535 || !singlePosition(position) || !result.Valid() {
 		return FieldingOutcome{}, errors.New("invalid fielding result")
 	}
-	if version == 0 || createdAt.IsZero() || updatedAt.Before(createdAt) || deletedAt != nil && deletedAt.Before(createdAt) {
+	if createdAt.IsZero() || updatedAt.Before(createdAt) || deletedAt != nil && deletedAt.Before(createdAt) {
 		return FieldingOutcome{}, errors.New("invalid fielding result lifecycle")
 	}
-	return FieldingOutcome{ID: id, Sequence: uint16(sequence), FielderID: fielderID, Position: position, Result: result, Description: strings.TrimSpace(description), Version: version, CreatedAt: createdAt, UpdatedAt: updatedAt, DeletedAt: copyTime(deletedAt)}, nil
+	return FieldingOutcome{ID: id, Sequence: uint16(sequence), FielderID: fielderID, Position: position, Result: result, Description: strings.TrimSpace(description), CreatedAt: createdAt, UpdatedAt: updatedAt, DeletedAt: copyTime(deletedAt)}, nil
 }
 
 type Play struct {
@@ -286,7 +282,6 @@ type Play struct {
 	pitches              []Pitch
 	runnerOutcomes       []RunnerOutcome
 	fieldingOutcomes     []FieldingOutcome
-	version              uint64
 	createdAt, updatedAt time.Time
 	deletedAt            *time.Time
 }
@@ -305,16 +300,16 @@ type PlayDraft struct {
 	FieldingOutcomes               []FieldingOutcome
 }
 
-func NewPlay(d PlayDraft, now time.Time) (Play, error) { return restorePlay(d, 1, now, now, nil) }
-func RestorePlay(d PlayDraft, version uint64, createdAt, updatedAt time.Time, deletedAt *time.Time) (Play, error) {
-	v, err := restorePlay(d, version, createdAt, updatedAt, deletedAt)
+func NewPlay(d PlayDraft, now time.Time) (Play, error) { return restorePlay(d, now, now, nil) }
+func RestorePlay(d PlayDraft, createdAt, updatedAt time.Time, deletedAt *time.Time) (Play, error) {
+	v, err := restorePlay(d, createdAt, updatedAt, deletedAt)
 	if err != nil {
 		return Play{}, fmt.Errorf("%w: %v", ErrCorruptedPlay, err)
 	}
 	return v, nil
 }
 
-func restorePlay(d PlayDraft, version uint64, createdAt, updatedAt time.Time, deletedAt *time.Time) (Play, error) {
+func restorePlay(d PlayDraft, createdAt, updatedAt time.Time, deletedAt *time.Time) (Play, error) {
 	d.ResultDescription = strings.TrimSpace(d.ResultDescription)
 	if d.ID == "" || d.MatchID == "" || d.BatterID == "" || d.StartingPitcherID == "" {
 		return Play{}, errors.New("play ids are required")
@@ -344,10 +339,10 @@ func restorePlay(d PlayDraft, version uint64, createdAt, updatedAt time.Time, de
 	if int(d.After.HomeScore-d.Before.HomeScore+d.After.AwayScore-d.Before.AwayScore) != scored {
 		return Play{}, errors.New("runner scores do not match situation")
 	}
-	if version == 0 || createdAt.IsZero() || updatedAt.Before(createdAt) || deletedAt != nil && deletedAt.Before(createdAt) {
+	if createdAt.IsZero() || updatedAt.Before(createdAt) || deletedAt != nil && deletedAt.Before(createdAt) {
 		return Play{}, errors.New("invalid play lifecycle")
 	}
-	return Play{id: d.ID, matchID: d.MatchID, sequence: uint32(d.Sequence), inning: uint16(d.Inning), half: d.Half, battingOrder: uint8(d.BattingOrder), batterID: d.BatterID, startingPitcherID: d.StartingPitcherID, before: copySituation(d.Before), after: copySituation(d.After), battingResult: d.BattingResult, resultDescription: d.ResultDescription, pitches: copyPitches(d.Pitches), runnerOutcomes: copyRunnerOutcomes(d.RunnerOutcomes), fieldingOutcomes: copyFieldingOutcomes(d.FieldingOutcomes), version: version, createdAt: createdAt, updatedAt: updatedAt, deletedAt: copyTime(deletedAt)}, nil
+	return Play{id: d.ID, matchID: d.MatchID, sequence: uint32(d.Sequence), inning: uint16(d.Inning), half: d.Half, battingOrder: uint8(d.BattingOrder), batterID: d.BatterID, startingPitcherID: d.StartingPitcherID, before: copySituation(d.Before), after: copySituation(d.After), battingResult: d.BattingResult, resultDescription: d.ResultDescription, pitches: copyPitches(d.Pitches), runnerOutcomes: copyRunnerOutcomes(d.RunnerOutcomes), fieldingOutcomes: copyFieldingOutcomes(d.FieldingOutcomes), createdAt: createdAt, updatedAt: updatedAt, deletedAt: copyTime(deletedAt)}, nil
 }
 
 func validateOrderedChildren(pitches []Pitch, runners []RunnerOutcome, fielding []FieldingOutcome) error {
@@ -397,7 +392,6 @@ func (p Play) ResultDescription() string           { return p.resultDescription 
 func (p Play) Pitches() []Pitch                    { return copyPitches(p.pitches) }
 func (p Play) RunnerOutcomes() []RunnerOutcome     { return copyRunnerOutcomes(p.runnerOutcomes) }
 func (p Play) FieldingOutcomes() []FieldingOutcome { return copyFieldingOutcomes(p.fieldingOutcomes) }
-func (p Play) Version() uint64                     { return p.version }
 func (p Play) CreatedAt() time.Time                { return p.createdAt }
 func (p Play) UpdatedAt() time.Time                { return p.updatedAt }
 func (p Play) DeletedAt() *time.Time               { return copyTime(p.deletedAt) }

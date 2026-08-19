@@ -90,7 +90,7 @@ func TestRepositorySkillsContainRequiredGuidance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, phrase := range []string{"六个职责区域", "Session", "Checkpoint", "尚未接入"} {
+	for _, phrase := range []string{"六个职责区域", "Session", "Checkpoint", "训练查询暂未适配"} {
 		if !strings.Contains(project.Content, phrase) {
 			t.Errorf("project Skill missing %q", phrase)
 		}
@@ -101,24 +101,24 @@ func TestRepositorySkillsContainRequiredGuidance(t *testing.T) {
 	}
 	for _, phrase := range []string{
 		"team_query", "team_modify", "confirmed=true", "不得猜测", "幂等",
-		"roster.teams", "roster.players", "game.matches", "game.match", "game.plays", "game.score", "lineup.list", "training.records",
-		"team.create", "player.create", "player.update", "player.set_active", "roster.assign", "roster.change_jersey", "roster.leave",
+		"team.list", "player.list", "game.list", "game.summaries", "game.records", "game.lineups", "game.performances",
+		"team.create", "player.create", "player.update", "player.set_active", "player.change_jersey",
 		"match.create", "match.update", "match.set_status", "match.delete", "lineup.create", "lineup.replace", "lineup.delete",
 		"training.create", "training.update", "training.delete",
-		"一次调用 `team_query` 的 `describe`", "一次启用全部必要模块", "不得仅为取得下一次查询所需的 ID 而拆分 `query`", "根目录 `describe` 仅用于",
-		"原始对象只用于脚本内部计算", "不得直接作为 `main` 的返回值", "构造面向当前任务的最小证据结构",
-		"除非后续 `team_modify` 确实需要稳定 ID", "已经转换为名称或业务标签的 ID 不得同时返回", "过滤、分组、聚合、排序和压缩重复模式",
+		"一次调用 `team_query` 的 `describe`", "一次启用全部必要模块", "不得拆分查询来猜测或传递内部 ID", "根目录 `describe` 仅用于",
+		"查询投影只用于脚本内部计算", "不得直接作为 `main` 的返回值", "构造面向当前任务的最小证据结构",
+		"不返回实体 ID", "不得尝试从名称推测 ID", "过滤、分组、聚合、排序和压缩重复模式",
 	} {
 		if !strings.Contains(teamSkill.Content, phrase) {
 			t.Errorf("team Skill missing %q", phrase)
 		}
 	}
-	for _, phrase := range []string{"同一轮并行执行两者的精确 `describe`", "projected_records", "player = {name = target_player.name", "local starters = {}", "local events = {}"} {
+	for _, phrase := range []string{"同一轮并行执行两者的精确 `describe`", "participant_names", "local result = {}", "score = {home = match.home_score", "不支持入队、离队或转队"} {
 		if !strings.Contains(teamSkill.Content, phrase) {
 			t.Errorf("team Skill missing projection guidance %q", phrase)
 		}
 	}
-	if strings.Contains(teamSkill.Content, "player = target_player") || strings.Contains(teamSkill.Content, "return team.game.plays") {
+	if strings.Contains(teamSkill.Content, "roster.assign") || strings.Contains(teamSkill.Content, "team.game.plays") || strings.Contains(teamSkill.Content, "player_id = target_player") {
 		t.Error("team Skill examples directly return raw domain objects")
 	}
 }

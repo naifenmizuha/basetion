@@ -2,6 +2,10 @@
 all:
     cd {{justfile_directory()}} && just db check && GOTOOLCHAIN=auto go test ./...
 
+# Run PostgreSQL integration tests against the explicitly prepared development database.
+postgres:
+    cd {{justfile_directory()}} && just db check && GOTOOLCHAIN=auto go test -tags=integration ./src/internal/infra/postgres
+
 # Query the development fixture roster through the agent.
 player:
     cd {{justfile_directory()}} && GOTOOLCHAIN=auto go run ./src/cmd/basetion --profile dev "查询数据库中所有球队的当前球员名单，并列出球员姓名、球衣号码、打击手、投球手和守备位置。"
@@ -22,4 +26,4 @@ temp:
     cd {{justfile_directory()}} && GOTOOLCHAIN=auto go run ./src/cmd/basetion --profile dev "查一下蜀汉队最近一场已结束的比赛：告诉我对手和最终比分，列出双方首发阵容，并按顺序概括这场比赛的所有打席"
 
 complex:
-    cd {{justfile_directory()}} && GOTOOLCHAIN=auto go run ./src/cmd/basetion --profile dev "查看迄今为止的所有比赛数据，并分析出球员在进攻和防守上的数据。分成进攻表现、投球表现（仅投手）、守备表现（仅野手）三类，列出每个球员的各项数据，并按表现从高到低排序。"
+    cd {{justfile_directory()}} && GOTOOLCHAIN=auto go run ./src/cmd/basetion --profile dev "查看迄今为止的所有比赛数据，并分析出球员在比赛中的表现。" > log/test.log

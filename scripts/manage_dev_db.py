@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Manage the fixed development PostgreSQL database outside the Go runtime."""
+"""Rebuild the fixed development PostgreSQL database from repository SQL."""
 
 from __future__ import annotations
 
 import argparse
 import sys
 from pathlib import Path
-from typing import Iterable
 from urllib.parse import urlsplit, urlunsplit
 
 try:
     import psycopg
+    from psycopg import sql
     import tomli
 except ModuleNotFoundError as error:
     missing = error.name
@@ -22,7 +22,6 @@ ROOT = Path(__file__).resolve().parent.parent
 CONFIG_FILE = ROOT / "config" / "config.toml"
 MIGRATIONS_DIR = ROOT / "sql" / "migrations"
 DEVELOPMENT_DATA_DIR = ROOT / "sql" / "development"
-TEST_RESET_FILE = ROOT / "sql" / "test" / "reset.sql"
 
 
 def development_database_url() -> str:
@@ -47,56 +46,28 @@ def administration_url(database_url: str) -> tuple[str, str]:
     return urlunsplit((parsed.scheme, parsed.netloc, "/postgres", parsed.query, "")), database_name
 
 
-def migration_files() -> Iterable[Path]:
-    return sorted(MIGRATIONS_DIR.glob("*.sql"))
-
-
 def execute_sql_file(connection: psycopg.Connection, path: Path) -> None:
     with connection.cursor() as cursor:
         cursor.execute(path.read_text(encoding="utf-8"))
 
 
-def create_database(database_url: str) -> None:
+def recreate_database(database_url: str) -> None:
     admin_url, database_name = administration_url(database_url)
     with psycopg.connect(admin_url, autocommit=True) as connection:
         with connection.cursor() as cursor:
-            cursor.execute("SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = %s)", (database_name,))
-            if cursor.fetchone()[0]:
-                return
-            cursor.execute("SELECT format('CREATE DATABASE %I', %s)", (database_name,))
-            cursor.execute(cursor.fetchone()[0])
-
-
-def migrate_database(database_url: str) -> None:
-    with psycopg.connect(database_url) as connection:
-        with connection.cursor() as cursor:
             cursor.execute(
-                "CREATE TABLE IF NOT EXISTS schema_migrations "
-                "(version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL)"
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = %s AND pid <> pg_backend_pid()",
+                (database_name,),
             )
-        for path in migration_files():
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = %s)", (path.name,))
-                if cursor.fetchone()[0]:
-                    continue
-                cursor.execute(path.read_text(encoding="utf-8"))
-                cursor.execute("INSERT INTO schema_migrations(version, applied_at) VALUES (%s, now())", (path.name,))
-            connection.commit()
+            cursor.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(database_name)))
+            cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name)))
 
 
-def check_database(database_url: str) -> None:
+def load_schema(database_url: str) -> None:
     with psycopg.connect(database_url) as connection:
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT 1")
-            for path in migration_files():
-                cursor.execute("SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = %s)", (path.name,))
-                if not cursor.fetchone()[0]:
-                    raise RuntimeError(f"数据库缺少迁移: {path.name}；请先执行 `just db dev-db-init`")
-
-
-def reset_test_data(database_url: str) -> None:
-    with psycopg.connect(database_url) as connection:
-        execute_sql_file(connection, TEST_RESET_FILE)
+        for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+            execute_sql_file(connection, path)
 
 
 def load_development_data(database_url: str) -> None:
@@ -105,36 +76,38 @@ def load_development_data(database_url: str) -> None:
             execute_sql_file(connection, path)
 
 
+def reset(database_url: str) -> None:
+    recreate_database(database_url)
+    load_schema(database_url)
+    load_development_data(database_url)
+    check(database_url)
+
+
+def check(database_url: str) -> None:
+    """Verify that the fixed development fixture has the minimum game data."""
+    with psycopg.connect(database_url) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM teams WHERE deleted_at IS NULL AND active")
+            teams = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM matches WHERE deleted_at IS NULL AND status = 3")
+            finals = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(DISTINCT match_id) FROM lineups WHERE deleted_at IS NULL")
+            lineup_matches = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM plays WHERE deleted_at IS NULL")
+            plays = cursor.fetchone()[0]
+    if teams < 2 or finals < 1 or lineup_matches < 1 or plays < 1:
+        raise RuntimeError("development fixture 不完整：需要两支启用球队、一场已结束比赛、阵容和有效 Play")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "action",
-        choices=("create", "migrate", "init", "reset", "test-reset", "test-load-development", "check"),
-    )
+    parser.add_argument("action", choices=("reset", "check"))
     action = parser.parse_args().action
     try:
-        database_url = development_database_url()
-        if action == "create":
-            create_database(database_url)
-        elif action == "migrate":
-            migrate_database(database_url)
-        elif action == "init":
-            create_database(database_url)
-            migrate_database(database_url)
-            reset_test_data(database_url)
-            load_development_data(database_url)
-        elif action == "reset":
-            check_database(database_url)
-            reset_test_data(database_url)
-            load_development_data(database_url)
-        elif action == "test-reset":
-            check_database(database_url)
-            reset_test_data(database_url)
-        elif action == "test-load-development":
-            check_database(database_url)
-            load_development_data(database_url)
-        else:
-            check_database(database_url)
+        if action == "reset":
+            reset(development_database_url())
+        elif action == "check":
+            check(development_database_url())
     except (OSError, RuntimeError, psycopg.Error) as error:
         print(f"数据库准备失败: {error}", file=sys.stderr)
         return 1

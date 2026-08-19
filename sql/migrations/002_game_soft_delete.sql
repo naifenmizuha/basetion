@@ -1,6 +1,9 @@
 ALTER TABLE teams ADD COLUMN deleted_at TIMESTAMPTZ;
 ALTER TABLE players ADD COLUMN deleted_at TIMESTAMPTZ;
-ALTER TABLE memberships ADD COLUMN deleted_at TIMESTAMPTZ;
+
+CREATE UNIQUE INDEX uq_players_active_team_jersey ON players(team_id, jersey_number) WHERE deleted_at IS NULL;
+CREATE INDEX idx_players_active_team_jersey_name ON players(team_id, jersey_number, name, id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_players_active_name ON players(name, jersey_number, id) WHERE deleted_at IS NULL;
 
 CREATE TABLE matches (
     id UUID PRIMARY KEY,
@@ -8,7 +11,6 @@ CREATE TABLE matches (
     away_team_id UUID NOT NULL,
     scheduled_at TIMESTAMPTZ NOT NULL,
     location TEXT NOT NULL,
-    version BIGINT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
     deleted_at TIMESTAMPTZ
@@ -24,7 +26,6 @@ CREATE TABLE lineups (
     player_id UUID NOT NULL,
     batting_order SMALLINT NOT NULL,
     position SMALLINT NOT NULL,
-    version BIGINT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
     deleted_at TIMESTAMPTZ

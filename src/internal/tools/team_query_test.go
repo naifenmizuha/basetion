@@ -34,7 +34,7 @@ func TestTeamQueryToolDescribeAndQuery(t *testing.T) {
 	t.Parallel()
 	teamQueryTool := newTestTeamQueryTool(t)
 
-	descriptionJSON, err := teamQueryTool.InvokableRun(context.Background(), `{"mode":"describe","topics":["roster.teams","unknown","roster.teams"]}`)
+	descriptionJSON, err := teamQueryTool.InvokableRun(context.Background(), `{"mode":"describe","topics":["team.list","unknown","team.list"]}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestTeamQueryToolDescribeAndQuery(t *testing.T) {
 	if err := json.Unmarshal([]byte(descriptionJSON), &description); err != nil {
 		t.Fatal(err)
 	}
-	if description.Mode != "describe" || len(description.Topics) != 2 || description.Topics[0].Name != "roster.teams" || !description.Topics[0].Found || description.Topics[1].Found || description.Topics[1].Error != "unknown team query topic" {
+	if description.Mode != "describe" || len(description.Topics) != 2 || description.Topics[0].Name != "team.list" || !description.Topics[0].Found || description.Topics[1].Found || description.Topics[1].Error != "unknown team query topic" {
 		t.Fatalf("unexpected description: %#v", description)
 	}
 
@@ -92,11 +92,11 @@ func TestTeamQueryToolValidation(t *testing.T) {
 	teamQueryTool := newTestTeamQueryTool(t)
 	tests := []string{
 		`{"mode":"invalid"}`,
-		`{"mode":"describe","modules":["roster"]}`,
+		`{"mode":"describe","modules":["team"]}`,
 		`{"mode":"describe","modules":[]}`,
 		`{"mode":"describe","program":"function main() end"}`,
 		`{"mode":"describe","program":""}`,
-		`{"mode":"query","topics":["roster.players"],"program":"function main() end"}`,
+		`{"mode":"query","topics":["player.list"],"program":"function main() end"}`,
 		`{"mode":"query","topics":[],"program":"function main() end"}`,
 		`{"mode":"query"}`,
 		`{"mode":"query","modules":["game"],"program":"function main() end"}`,

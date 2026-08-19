@@ -8,9 +8,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/naifenmizuha/basetion/src/internal/domain/game"
-	domainroster "github.com/naifenmizuha/basetion/src/internal/domain/roster"
+	"github.com/naifenmizuha/basetion/src/internal/domain/player"
+	"github.com/naifenmizuha/basetion/src/internal/infra/postgres/sqlcgen"
 )
-type Store struct{ pool *pgxpool.Pool }
+
+type Store struct {
+	pool    *pgxpool.Pool
+	queries *sqlcgen.Queries
+}
 
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
 	if databaseURL == "" {
@@ -26,16 +31,37 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 	}
 	return &Store{pool: pool}, nil
 }
+func (s *Store) Close() { s.pool.Close() }
 
+func (s *Store) queryExecutor() *sqlcgen.Queries {
+	if s.queries != nil {
+		return s.queries
+	}
+	return sqlcgen.New(s.pool)
+}
+func (s *Store) WithinTransaction(ctx context.Context, fn func(player.Repositories) error) error {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin player transaction: %w", err)
+	}
+	queries := sqlcgen.New(tx)
+	repositories := player.Repositories{Teams: &TeamRepository{queries: queries}, Players: &PlayerRepository{queries: queries}, Training: &TrainingRepository{queries: queries}}
+	if err := fn(repositories); err != nil {
+		_ = tx.Rollback(ctx)
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit player transaction: %w", err)
+	}
+	return nil
+}
 func (s *Store) WithinGameTransaction(ctx context.Context, fn func(game.Repositories) error) error {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin game transaction: %w", err)
 	}
-	repositories := game.Repositories{
-		Matches: &MatchRepository{db: tx}, Lineups: &LineupRepository{db: tx}, Plays: &PlayRepository{db: tx},
-		Teams: &TeamRepository{db: tx}, Players: &PlayerRepository{db: tx},
-	}
+	queries := sqlcgen.New(tx)
+	repositories := game.Repositories{Matches: &MatchRepository{queries: queries}, Lineups: &LineupRepository{queries: queries}, Plays: &PlayRepository{queries: queries}, Teams: &TeamRepository{queries: queries}, Players: &PlayerRepository{queries: queries}}
 	if err := fn(repositories); err != nil {
 		_ = tx.Rollback(ctx)
 		return err
@@ -45,31 +71,12 @@ func (s *Store) WithinGameTransaction(ctx context.Context, fn func(game.Reposito
 	}
 	return nil
 }
-
-func (s *Store) Close() { s.pool.Close() }
-func (s *Store) WithinTransaction(ctx context.Context, fn func(domainroster.Repositories) error) error {
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return fmt.Errorf("begin roster transaction: %w", err)
-	}
-	repositories := domainroster.Repositories{
-		Teams:       &TeamRepository{db: tx},
-		Players:     &PlayerRepository{db: tx},
-		Memberships: &membershipRepository{db: tx},
-		Training:    &TrainingRepository{db: tx},
-	}
-	if err := fn(repositories); err != nil {
-		_ = tx.Rollback(ctx)
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit roster transaction: %w", err)
-	}
-	return nil
+func (s *Store) Players() *PlayerRepository {
+	return &PlayerRepository{queries: sqlcgen.New(s.pool)}
 }
-
-func (s *Store) Players() *PlayerRepository { return &PlayerRepository{db: s.pool} }
-func (s *Store) Teams() *TeamRepository     { return &TeamRepository{db: s.pool} }
+func (s *Store) Teams() *TeamRepository {
+	return &TeamRepository{queries: sqlcgen.New(s.pool)}
+}
 func (s *Store) Training() *TrainingRepository {
-	return &TrainingRepository{db: s.pool}
+	return &TrainingRepository{queries: sqlcgen.New(s.pool)}
 }

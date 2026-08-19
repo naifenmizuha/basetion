@@ -1,12 +1,11 @@
 TRUNCATE TABLE
     play_fielding_results,
     play_runner_results,
-    pitches,
+    play_pitching_results,
     plays,
     lineups,
     matches,
     training_records,
-    memberships,
     players,
     teams
 RESTART IDENTITY;

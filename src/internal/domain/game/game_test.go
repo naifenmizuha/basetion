@@ -27,8 +27,8 @@ func TestMatchValidationAndSoftDelete(t *testing.T) {
 	if err := value.Delete(now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if value.DeletedAt() == nil || value.Version() != 3 {
-		t.Fatalf("deleted=%v version=%d", value.DeletedAt(), value.Version())
+	if value.DeletedAt() == nil {
+		t.Fatalf("deleted=%v", value.DeletedAt())
 	}
 	if err := value.Delete(now.Add(2 * time.Hour)); !errors.Is(err, ErrMatchNotFound) {
 		t.Fatalf("second delete=%v", err)

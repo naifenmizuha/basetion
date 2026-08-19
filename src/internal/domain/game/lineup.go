@@ -19,9 +19,8 @@ const (
 )
 
 var (
-	ErrLineupNotFound        = errors.New("lineup not found")
-	ErrLineupVersionConflict = errors.New("lineup version conflict")
-	ErrCorruptedLineup       = errors.New("corrupted lineup data")
+	ErrLineupNotFound  = errors.New("lineup not found")
+	ErrCorruptedLineup = errors.New("corrupted lineup data")
 )
 
 type LineupEntry struct {
@@ -58,22 +57,21 @@ type Lineup struct {
 	variantNumber        uint16
 	variantName          string
 	entries              []LineupEntry
-	version              uint64
 	createdAt, updatedAt time.Time
 	deletedAt            *time.Time
 }
 
 func NewLineup(matchID MatchID, teamID team.ID, kind LineupKind, number int, name string, entries []LineupEntry, now time.Time) (Lineup, error) {
-	return restoreLineup(matchID, teamID, kind, number, name, entries, 1, now, now, nil)
+	return restoreLineup(matchID, teamID, kind, number, name, entries, now, now, nil)
 }
-func RestoreLineup(matchID MatchID, teamID team.ID, kind LineupKind, number int, name string, entries []LineupEntry, version uint64, createdAt, updatedAt time.Time, deletedAt *time.Time) (Lineup, error) {
-	v, err := restoreLineup(matchID, teamID, kind, number, name, entries, version, createdAt, updatedAt, deletedAt)
+func RestoreLineup(matchID MatchID, teamID team.ID, kind LineupKind, number int, name string, entries []LineupEntry, createdAt, updatedAt time.Time, deletedAt *time.Time) (Lineup, error) {
+	v, err := restoreLineup(matchID, teamID, kind, number, name, entries, createdAt, updatedAt, deletedAt)
 	if err != nil {
 		return Lineup{}, fmt.Errorf("%w: %v", ErrCorruptedLineup, err)
 	}
 	return v, nil
 }
-func restoreLineup(matchID MatchID, teamID team.ID, kind LineupKind, number int, name string, entries []LineupEntry, version uint64, createdAt, updatedAt time.Time, deletedAt *time.Time) (Lineup, error) {
+func restoreLineup(matchID MatchID, teamID team.ID, kind LineupKind, number int, name string, entries []LineupEntry, createdAt, updatedAt time.Time, deletedAt *time.Time) (Lineup, error) {
 	name = strings.TrimSpace(name)
 	switch {
 	case matchID == "" || teamID == "":
@@ -90,8 +88,6 @@ func restoreLineup(matchID MatchID, teamID team.ID, kind LineupKind, number int,
 		return Lineup{}, errors.New("lineup name is required")
 	case len(entries) == 0:
 		return Lineup{}, errors.New("lineup entries are required")
-	case version == 0:
-		return Lineup{}, errors.New("lineup version must be positive")
 	case createdAt.IsZero() || updatedAt.IsZero() || updatedAt.Before(createdAt):
 		return Lineup{}, errors.New("invalid lineup timestamps")
 	case deletedAt != nil && deletedAt.Before(createdAt):
@@ -113,7 +109,7 @@ func restoreLineup(matchID MatchID, teamID team.ID, kind LineupKind, number int,
 		}
 		players[entry.playerID], orders[entry.battingOrder], ids[entry.id] = true, true, true
 	}
-	return Lineup{matchID: matchID, teamID: teamID, kind: kind, variantNumber: uint16(number), variantName: name, entries: append([]LineupEntry(nil), entries...), version: version, createdAt: createdAt, updatedAt: updatedAt, deletedAt: copyTime(deletedAt)}, nil
+	return Lineup{matchID: matchID, teamID: teamID, kind: kind, variantNumber: uint16(number), variantName: name, entries: append([]LineupEntry(nil), entries...), createdAt: createdAt, updatedAt: updatedAt, deletedAt: copyTime(deletedAt)}, nil
 }
 func singlePosition(position player.PositionFlags) bool {
 	return position.Valid() && position&(position-1) == 0
@@ -124,7 +120,6 @@ func (l Lineup) Kind() LineupKind       { return l.kind }
 func (l Lineup) VariantNumber() uint16  { return l.variantNumber }
 func (l Lineup) VariantName() string    { return l.variantName }
 func (l Lineup) Entries() []LineupEntry { return append([]LineupEntry(nil), l.entries...) }
-func (l Lineup) Version() uint64        { return l.version }
 func (l Lineup) CreatedAt() time.Time   { return l.createdAt }
 func (l Lineup) UpdatedAt() time.Time   { return l.updatedAt }
 func (l Lineup) DeletedAt() *time.Time  { return copyTime(l.deletedAt) }

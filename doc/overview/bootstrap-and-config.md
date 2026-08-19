@@ -7,19 +7,10 @@
 
 ## 配置
 
-配置使用 Viper 从进程当前工作目录下的 `config/config.toml` 读取，并使用 gotenv 可选解析进程当前工作目录下的 `.env`。`.env` 不存在时继续启动；文件无法读取或格式错误、TOML 不存在或无法解析、字段校验失败时启动终止。配置分为四个职责组：
-
-- `openai.model`、`openai.api_key_env` 必填，`openai.base_url` 可选；`openai.reasoning_effort` 和 `openai.reasoning_summary` 默认分别为 `high`、`detailed`，不能为空，并传递给 Responses API。`api_key_env` 保存提供真实 API Key 的环境变量名称；该变量不存在或值为空时配置无效，真实密钥不从 TOML 解码。
-- `database.run` 与 `database.dev` 都固定要求 `url`。两者只表示应用连接目标，不携带数据库创建、迁移、清理或 fixture 载入策略。
-- `session.dir` 默认 `.basetion/sessions`。
-- `agent.max_iterations` 默认 20，必须为正整数；`agent.unsafe_debug_data` 默认关闭。
-
-模型、数据库、Session 和 Agent 配置只从 TOML 读取，不接受环境变量覆盖。解析 `api_key_env` 后，真实 API Key 按进程环境优先于 `.env` 的顺序读取。`config/config.example.toml` 与 `.env.example` 提供无密钥模板；实际 `config/config.toml` 和 `.env` 被 Git 忽略。`LoadDatabaseFile` 仅解析并校验数据库配置，供 PostgreSQL 集成测试复用而不要求模型凭据，也不发布全局快照。仓库的 Python 数据库脚本单独用 `tomli` 读取相同 TOML 中的 `database.dev.url`，不依赖 Go 配置包。
-
-`Init` 只允许一次初始化尝试，成功后发布进程级只读配置快照；`InitFile` 允许测试从隔离路径初始化。`Get` 返回配置值副本，初始化成功前调用会 panic。配置不支持运行时修改或热加载。`Validate` 汇总多个配置问题；`DiagnosticFields` 不包含 API Key。
+配置使用 Viper 从当前工作目录的 `config/config.toml` 读取，并可选解析 `.env`。`openai` 配置保存模型、请求选项和 API Key 的环境变量名；`database.run` 与 `database.dev` 只保存各自固定连接 URL；Session 和 Agent 配置也由 TOML 管理。真实 API Key 不写入 TOML，按进程环境优先于 `.env` 读取。配置不支持环境变量覆盖数据库连接、热加载或运行时修改。
 
 ## 组合根
 
-`bootstrap.Execute` 是具体实现的装配位置。它先从 CLI 提取 `--profile run|dev`（默认 run），再完成全局配置和中文语言初始化、文件 Session 存储、对应 profile 的 PostgreSQL 存储、球队/名单/比赛/自训记录只读领域服务、Team Query Lua 执行器与领域服务、球队/球员/名单/比赛/自训记录写领域服务、`team_query` 与 `team_modify` 工具、AgenticModel、Harness Runtime、会话服务和 CLI 调用。写领域服务共享系统时钟；工具层直接调用领域服务，不新增 application 模块。组合根只打开并在进程结束时关闭连接池，数据库创建、迁移、清理和示例数据载入均由仓库的 Python 工具在启动前显式完成。
+`bootstrap.Execute` 提取 `--profile run|dev`，初始化配置和 Eino 中文语言，连接选定 profile 的 PostgreSQL，然后组装文件 Session 存储、球队/球员/比赛/训练领域服务、Lua Team Query Executor、Team Query/Modify 工具、模型、Harness 和会话服务。Player 查询服务从 PostgreSQL 的姓名化 Reader 构造，Game 查询服务直接使用 Store 的五类只读投影。
 
-任一步初始化失败都会向 stderr 输出带阶段语义的错误并返回非零退出码。启动日志使用脱敏诊断字段；具体依赖关系不下沉到入口或领域模块。
+组合根不创建数据库、执行迁移、重置数据或生成 sqlc 代码；这些动作由显式 Just 配方完成。任一初始化失败都会按阶段输出错误并返回非零退出码，连接池在进程结束时关闭。

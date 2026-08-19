@@ -292,12 +292,12 @@ func (h *teamModifyHandler) executeGame(ctx context.Context, operation string, a
 	}
 }
 func matchResult(v game.Match) map[string]any {
-	return map[string]any{"id": v.ID(), "home_team_id": v.HomeTeamID(), "away_team_id": v.AwayTeamID(), "scheduled_at": v.ScheduledAt().Format(time.RFC3339), "location": v.Location(), "status": matchStatusResult(v.Status()), "version": v.Version()}
+	return map[string]any{"id": v.ID(), "home_team_id": v.HomeTeamID(), "away_team_id": v.AwayTeamID(), "scheduled_at": v.ScheduledAt().Format(time.RFC3339), "location": v.Location(), "status": matchStatusResult(v.Status())}
 }
 func matchStatusResult(v game.MatchStatus) string {
 	values := map[game.MatchStatus]string{game.MatchScheduled: "scheduled", game.MatchInProgress: "in_progress", game.MatchFinal: "final", game.MatchCancelled: "cancelled"}
 	return values[v]
 }
 func lineupResult(v game.Lineup) map[string]any {
-	return map[string]any{"match_id": v.MatchID(), "team_id": v.TeamID(), "kind": v.Kind(), "variant_number": v.VariantNumber(), "variant_name": v.VariantName(), "version": v.Version()}
+	return map[string]any{"match_id": v.MatchID(), "team_id": v.TeamID(), "kind": v.Kind(), "variant_number": v.VariantNumber(), "variant_name": v.VariantName()}
 }

@@ -13,7 +13,7 @@ Basetion 是一个以 Go 和 CloudWeGo Eino ADK 为核心的 Agent 应用骨架�
 
 - 可以在多轮 Session 中延续已经成功完成的对话。
 - 可以按需加载项目知识与球队管理 Skill。
-- 可以通过 `team_query` 的 `roster`、`game`、`lineup` 和 `training` 模块读取 PostgreSQL 中的球队、球员、名单、比赛、阵容与自训记录，并通过 `team_modify` 执行预定义修改；分析模块目前尚未接入。
+- 可以通过 `team_query` 的 `team`、`player` 和 `game` 模块读取球队、当前球员、比赛目录和比赛摘要；完整记录、阵容和表现以 `describe` 的可用性为准。训练查询暂未适配到姓名化 Lua 协议。可以通过 `team_modify` 执行预定义修改。
 - 可以执行不依赖球队数据模块的受限只读 Lua 计算。
 
 ## 六个职责区域

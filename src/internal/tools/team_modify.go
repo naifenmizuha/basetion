@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/naifenmizuha/basetion/src/internal/domain/game"
 	"github.com/naifenmizuha/basetion/src/internal/domain/player"
-	"github.com/naifenmizuha/basetion/src/internal/domain/roster"
 	"github.com/naifenmizuha/basetion/src/internal/domain/team"
 	"github.com/naifenmizuha/basetion/src/internal/domain/training"
 )
@@ -27,16 +26,12 @@ type TeamModifier interface {
 }
 
 type PlayerModifier interface {
-	Create(context.Context, player.ID, string, player.HandFlags, player.HandFlags, player.PositionFlags) (player.Player, error)
+	Create(context.Context, player.ID, team.ID, int, string, player.HandFlags, player.HandFlags, player.PositionFlags) (player.Player, error)
 	Update(context.Context, player.ID, string, player.HandFlags, player.HandFlags, player.PositionFlags) (player.Player, error)
 	SetActive(context.Context, player.ID, bool) (player.Player, error)
+	ChangeJersey(context.Context, player.ID, int) (player.Player, error)
 }
 
-type RosterModifier interface {
-	Assign(context.Context, roster.ID, team.ID, player.ID, int, roster.Date) (roster.Membership, error)
-	ChangeJersey(context.Context, team.ID, roster.ID, int) (roster.Membership, error)
-	Leave(context.Context, team.ID, roster.ID, roster.Date) (roster.Membership, error)
-}
 type GameModifier interface {
 	CreateMatchWith(context.Context, game.MatchID, team.ID, team.ID, time.Time, string, game.MatchStatus) (game.Match, error)
 	UpdateMatch(context.Context, game.MatchID, team.ID, team.ID, time.Time, string) (game.Match, error)
@@ -140,15 +135,14 @@ type modifyOperation struct {
 type teamModifyHandler struct {
 	teams      TeamModifier
 	players    PlayerModifier
-	rosters    RosterModifier
 	games      GameModifier
 	training   TrainingModifier
 	newID      IDGenerator
 	operations map[string]modifyOperation
 }
 
-func NewTeamModify(teams TeamModifier, players PlayerModifier, rosters RosterModifier, games GameModifier, trainingService TrainingModifier, options ...TeamModifyOption) (tool.InvokableTool, error) {
-	if teams == nil || players == nil || rosters == nil || games == nil || trainingService == nil {
+func NewTeamModify(teams TeamModifier, players PlayerModifier, games GameModifier, trainingService TrainingModifier, options ...TeamModifyOption) (tool.InvokableTool, error) {
+	if teams == nil || players == nil || games == nil || trainingService == nil {
 		return nil, errors.New("team modify services are required")
 	}
 	settings := teamModifyOptions{newID: uuid.NewString}
@@ -158,7 +152,7 @@ func NewTeamModify(teams TeamModifier, players PlayerModifier, rosters RosterMod
 	if settings.newID == nil {
 		return nil, errors.New("team modify id generator is required")
 	}
-	handler := &teamModifyHandler{teams: teams, players: players, rosters: rosters, games: games, training: trainingService, newID: settings.newID, operations: defaultModifyOperations()}
+	handler := &teamModifyHandler{teams: teams, players: players, games: games, training: trainingService, newID: settings.newID, operations: defaultModifyOperations()}
 	return toolutils.InferTool(
 		TeamModifyToolName,
 		"发现并执行预定义的球队数据修改操作。先用 describe 一次加载所需操作及参数；获得用户对完整修改的明确确认后，才能用 execute 执行。多个修改通过 operations 一次提交，按数组顺序执行，遇错中止且不回滚，并返回失败位置、原因和未执行步骤。该工具不接受脚本或数据库语句。",
@@ -255,7 +249,7 @@ func (h *teamModifyHandler) executeBatch(ctx context.Context, requests []teamMod
 
 func (h *teamModifyHandler) describe(requested []string) []modifyTopicDescription {
 	if len(requested) == 0 {
-		groups := []string{"team", "player", "roster", "match", "lineup", "training"}
+		groups := []string{"team", "player", "match", "lineup", "training"}
 		result := make([]modifyTopicDescription, 0, len(groups))
 		for _, group := range groups {
 			result = append(result, h.describeGroup(group))
@@ -270,7 +264,7 @@ func (h *teamModifyHandler) describe(requested []string) []modifyTopicDescriptio
 			continue
 		}
 		seen[name] = struct{}{}
-		if name == "team" || name == "player" || name == "roster" || name == "match" || name == "lineup" || name == "training" {
+		if name == "team" || name == "player" || name == "match" || name == "lineup" || name == "training" {
 			result = append(result, h.describeGroup(name))
 			continue
 		}
@@ -299,7 +293,7 @@ func (h *teamModifyHandler) describeGroup(group string) modifyTopicDescription {
 	return modifyTopicDescription{Name: group, Kind: "group", Found: true, Summary: group + " 数据修改操作。", Children: children}
 }
 
-var modifyOperationOrder = []string{"team.create", "player.create", "player.update", "player.set_active", "roster.assign", "roster.change_jersey", "roster.leave", "match.create", "match.update", "match.set_status", "match.delete", "lineup.create", "lineup.replace", "lineup.delete", "training.create", "training.update", "training.delete"}
+var modifyOperationOrder = []string{"team.create", "player.create", "player.update", "player.set_active", "player.change_jersey", "match.create", "match.update", "match.set_status", "match.delete", "lineup.create", "lineup.replace", "lineup.delete", "training.create", "training.update", "training.delete"}
 
 func defaultModifyOperations() map[string]modifyOperation {
 	hands := []string{"left", "right"}
@@ -312,12 +306,10 @@ func defaultModifyOperations() map[string]modifyOperation {
 	}
 	return map[string]modifyOperation{
 		"team.create":          {name: "team.create", group: "team", summary: "创建一个启用的球队。", parameters: []modifyFieldDescription{{Name: "name", Type: "string", Required: true, Description: "球队名称。"}}, resultType: "team"},
-		"player.create":        {name: "player.create", group: "player", summary: "创建一个启用的球员。", parameters: profile, resultType: "player"},
+		"player.create":        {name: "player.create", group: "player", summary: "创建一个归属球队的启用球员。", parameters: append([]modifyFieldDescription{{Name: "team_id", Type: "string", Required: true, Description: "所属球队 ID。"}, {Name: "jersey_number", Type: "integer", Required: true, Description: "0 到 99 的球衣号码。"}}, profile...), resultType: "player"},
 		"player.update":        {name: "player.update", group: "player", summary: "更新球员的完整资料。", parameters: append([]modifyFieldDescription{{Name: "player_id", Type: "string", Required: true, Description: "球员 ID。"}}, profile...), resultType: "player"},
 		"player.set_active":    {name: "player.set_active", group: "player", summary: "启用或停用球员。", parameters: []modifyFieldDescription{{Name: "player_id", Type: "string", Required: true, Description: "球员 ID。"}, {Name: "active", Type: "boolean", Required: true, Description: "目标启用状态。"}}, resultType: "player"},
-		"roster.assign":        {name: "roster.assign", group: "roster", summary: "将球员加入球队名单。", parameters: []modifyFieldDescription{{Name: "team_id", Type: "string", Required: true, Description: "球队 ID。"}, {Name: "player_id", Type: "string", Required: true, Description: "球员 ID。"}, {Name: "jersey_number", Type: "integer", Required: true, Description: "0 到 99 的球衣号码。"}, {Name: "joined_at", Type: "string", Required: true, Description: "加入日期，格式 YYYY-MM-DD。"}}, resultType: "membership"},
-		"roster.change_jersey": {name: "roster.change_jersey", group: "roster", summary: "修改当前名单成员的球衣号码。", parameters: []modifyFieldDescription{{Name: "team_id", Type: "string", Required: true, Description: "球队 ID。"}, {Name: "membership_id", Type: "string", Required: true, Description: "名单记录 ID。"}, {Name: "jersey_number", Type: "integer", Required: true, Description: "0 到 99 的新球衣号码。"}}, resultType: "membership"},
-		"roster.leave":         {name: "roster.leave", group: "roster", summary: "结束球员的当前效力关系。", parameters: []modifyFieldDescription{{Name: "team_id", Type: "string", Required: true, Description: "球队 ID。"}, {Name: "membership_id", Type: "string", Required: true, Description: "名单记录 ID。"}, {Name: "left_at", Type: "string", Required: true, Description: "离队日期，格式 YYYY-MM-DD。"}}, resultType: "membership"},
+		"player.change_jersey": {name: "player.change_jersey", group: "player", summary: "修改球员当前背号。", parameters: []modifyFieldDescription{{Name: "player_id", Type: "string", Required: true, Description: "球员 ID。"}, {Name: "jersey_number", Type: "integer", Required: true, Description: "0 到 99 的新球衣号码。"}}, resultType: "player"},
 		"match.create":         {name: "match.create", group: "match", summary: "创建比赛。", parameters: matchCreateFields(), resultType: "match"},
 		"match.update":         {name: "match.update", group: "match", summary: "更新比赛安排。", parameters: append([]modifyFieldDescription{{Name: "match_id", Type: "string", Required: true, Description: "比赛 ID。"}}, matchBaseFields()...), resultType: "match"},
 		"match.set_status":     {name: "match.set_status", group: "match", summary: "设置比赛状态。", parameters: []modifyFieldDescription{{Name: "match_id", Type: "string", Required: true, Description: "比赛 ID。"}, {Name: "status", Type: "string", Required: true, Description: "比赛状态。", Values: []string{"scheduled", "in_progress", "final", "cancelled"}}}, resultType: "match"},
@@ -340,6 +332,15 @@ type playerProfileArguments struct {
 	ThrowingHands []string `json:"throwing_hands"`
 	Positions     []string `json:"positions"`
 }
+type playerCreateArguments struct {
+	TeamID       string `json:"team_id"`
+	JerseyNumber *int   `json:"jersey_number"`
+	playerProfileArguments
+}
+type playerChangeJerseyArguments struct {
+	PlayerID     string `json:"player_id"`
+	JerseyNumber *int   `json:"jersey_number"`
+}
 type playerUpdateArguments struct {
 	PlayerID string `json:"player_id"`
 	playerProfileArguments
@@ -347,22 +348,6 @@ type playerUpdateArguments struct {
 type playerSetActiveArguments struct {
 	PlayerID string `json:"player_id"`
 	Active   *bool  `json:"active"`
-}
-type rosterAssignArguments struct {
-	TeamID       string `json:"team_id"`
-	PlayerID     string `json:"player_id"`
-	JerseyNumber *int   `json:"jersey_number"`
-	JoinedAt     string `json:"joined_at"`
-}
-type rosterChangeJerseyArguments struct {
-	TeamID       string `json:"team_id"`
-	MembershipID string `json:"membership_id"`
-	JerseyNumber *int   `json:"jersey_number"`
-}
-type rosterLeaveArguments struct {
-	TeamID       string `json:"team_id"`
-	MembershipID string `json:"membership_id"`
-	LeftAt       string `json:"left_at"`
 }
 type trainingCreateArguments struct {
 	PlayerID     string `json:"player_id"`
@@ -392,15 +377,18 @@ func (h *teamModifyHandler) execute(ctx context.Context, operation string, argum
 		}
 		return teamResult(value), nil
 	case "player.create":
-		var input playerProfileArguments
+		var input playerCreateArguments
 		if err := decodeArguments(arguments, &input); err != nil {
 			return nil, err
 		}
-		batting, throwing, positions, err := parseProfile(input)
+		if input.JerseyNumber == nil {
+			return nil, errors.New("jersey_number is required")
+		}
+		batting, throwing, positions, err := parseProfile(input.playerProfileArguments)
 		if err != nil {
 			return nil, err
 		}
-		value, err := h.players.Create(ctx, player.ID(h.newID()), input.Name, batting, throwing, positions)
+		value, err := h.players.Create(ctx, player.ID(h.newID()), team.ID(input.TeamID), *input.JerseyNumber, input.Name, batting, throwing, positions)
 		if err != nil {
 			return nil, err
 		}
@@ -432,50 +420,19 @@ func (h *teamModifyHandler) execute(ctx context.Context, operation string, argum
 			return nil, err
 		}
 		return playerResult(value), nil
-	case "roster.assign":
-		var input rosterAssignArguments
+	case "player.change_jersey":
+		var input playerChangeJerseyArguments
 		if err := decodeArguments(arguments, &input); err != nil {
 			return nil, err
 		}
 		if input.JerseyNumber == nil {
 			return nil, errors.New("jersey_number is required")
 		}
-		joined, err := roster.ParseDate(input.JoinedAt)
-		if err != nil {
-			return nil, fmt.Errorf("parse joined_at: %w", err)
-		}
-		value, err := h.rosters.Assign(ctx, roster.ID(h.newID()), team.ID(input.TeamID), player.ID(input.PlayerID), *input.JerseyNumber, joined)
+		value, err := h.players.ChangeJersey(ctx, player.ID(input.PlayerID), *input.JerseyNumber)
 		if err != nil {
 			return nil, err
 		}
-		return membershipResult(value), nil
-	case "roster.change_jersey":
-		var input rosterChangeJerseyArguments
-		if err := decodeArguments(arguments, &input); err != nil {
-			return nil, err
-		}
-		if input.JerseyNumber == nil {
-			return nil, errors.New("jersey_number is required")
-		}
-		value, err := h.rosters.ChangeJersey(ctx, team.ID(input.TeamID), roster.ID(input.MembershipID), *input.JerseyNumber)
-		if err != nil {
-			return nil, err
-		}
-		return membershipResult(value), nil
-	case "roster.leave":
-		var input rosterLeaveArguments
-		if err := decodeArguments(arguments, &input); err != nil {
-			return nil, err
-		}
-		left, err := roster.ParseDate(input.LeftAt)
-		if err != nil {
-			return nil, fmt.Errorf("parse left_at: %w", err)
-		}
-		value, err := h.rosters.Leave(ctx, team.ID(input.TeamID), roster.ID(input.MembershipID), left)
-		if err != nil {
-			return nil, err
-		}
-		return membershipResult(value), nil
+		return playerResult(value), nil
 	case "training.create":
 		var input trainingCreateArguments
 		if err := decodeArguments(arguments, &input); err != nil {
@@ -535,11 +492,14 @@ func validateModifyArguments(operation string, arguments map[string]any) error {
 	case "team.create":
 		return decodeArguments(arguments, &teamCreateArguments{})
 	case "player.create":
-		var input playerProfileArguments
+		var input playerCreateArguments
 		if err := decodeArguments(arguments, &input); err != nil {
 			return err
 		}
-		_, _, _, err := parseProfile(input)
+		if input.JerseyNumber == nil {
+			return errors.New("jersey_number is required")
+		}
+		_, _, _, err := parseProfile(input.playerProfileArguments)
 		return err
 	case "player.update":
 		var input playerUpdateArguments
@@ -557,34 +517,13 @@ func validateModifyArguments(operation string, arguments map[string]any) error {
 			return errors.New("active is required")
 		}
 		return nil
-	case "roster.assign":
-		var input rosterAssignArguments
+	case "player.change_jersey":
+		var input playerChangeJerseyArguments
 		if err := decodeArguments(arguments, &input); err != nil {
 			return err
 		}
 		if input.JerseyNumber == nil {
 			return errors.New("jersey_number is required")
-		}
-		if _, err := roster.ParseDate(input.JoinedAt); err != nil {
-			return fmt.Errorf("parse joined_at: %w", err)
-		}
-		return nil
-	case "roster.change_jersey":
-		var input rosterChangeJerseyArguments
-		if err := decodeArguments(arguments, &input); err != nil {
-			return err
-		}
-		if input.JerseyNumber == nil {
-			return errors.New("jersey_number is required")
-		}
-		return nil
-	case "roster.leave":
-		var input rosterLeaveArguments
-		if err := decodeArguments(arguments, &input); err != nil {
-			return err
-		}
-		if _, err := roster.ParseDate(input.LeftAt); err != nil {
-			return fmt.Errorf("parse left_at: %w", err)
 		}
 		return nil
 	case "training.create":
@@ -656,21 +595,12 @@ func parsePositions(values []string) (player.PositionFlags, error) {
 }
 
 func teamResult(value team.Team) map[string]any {
-	return map[string]any{"id": value.ID(), "name": value.Name(), "active": value.Active(), "version": value.Version()}
+	return map[string]any{"id": value.ID(), "name": value.Name(), "active": value.Active()}
 }
 func playerResult(value player.Player) map[string]any {
-	return map[string]any{"id": value.ID(), "name": value.Name(), "active": value.Active(), "version": value.Version()}
-}
-func membershipResult(value roster.Membership) map[string]any {
-	result := map[string]any{"id": value.ID(), "team_id": value.TeamID(), "player_id": value.PlayerID(), "jersey_number": value.JerseyNumber(), "joined_at": value.JoinedAt().String(), "version": value.Version(), "active": value.Current()}
-	if left := value.LeftAt(); left != nil {
-		result["left_at"] = left.String()
-	} else {
-		result["left_at"] = nil
-	}
-	return result
+	return map[string]any{"id": value.ID(), "team_id": value.TeamID(), "jersey_number": value.JerseyNumber(), "name": value.Name(), "active": value.Active()}
 }
 
 func trainingResult(value training.Record) map[string]any {
-	return map[string]any{"id": value.ID(), "player_id": value.PlayerID(), "training_date": value.TrainingDate().String(), "content": value.Content(), "reflection": value.Reflection(), "version": value.Version(), "created_at": value.CreatedAt().Format(time.RFC3339Nano), "updated_at": value.UpdatedAt().Format(time.RFC3339Nano)}
+	return map[string]any{"id": value.ID(), "player_id": value.PlayerID(), "training_date": value.TrainingDate().String(), "content": value.Content(), "reflection": value.Reflection(), "created_at": value.CreatedAt().Format(time.RFC3339Nano), "updated_at": value.UpdatedAt().Format(time.RFC3339Nano)}
 }

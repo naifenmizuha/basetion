@@ -20,9 +20,8 @@ const (
 )
 
 var (
-	ErrMatchNotFound        = errors.New("match not found")
-	ErrMatchVersionConflict = errors.New("match version conflict")
-	ErrCorruptedMatch       = errors.New("corrupted match data")
+	ErrMatchNotFound  = errors.New("match not found")
+	ErrCorruptedMatch = errors.New("corrupted match data")
 )
 
 type Match struct {
@@ -31,24 +30,23 @@ type Match struct {
 	scheduledAt            time.Time
 	location               string
 	status                 MatchStatus
-	version                uint64
 	createdAt, updatedAt   time.Time
 	deletedAt              *time.Time
 }
 
 func NewMatch(id MatchID, home, away team.ID, scheduledAt time.Time, location string, status MatchStatus, now time.Time) (Match, error) {
-	return restoreMatch(id, home, away, scheduledAt, location, status, 1, now, now, nil)
+	return restoreMatch(id, home, away, scheduledAt, location, status, now, now, nil)
 }
 
-func RestoreMatch(id MatchID, home, away team.ID, scheduledAt time.Time, location string, status MatchStatus, version uint64, createdAt, updatedAt time.Time, deletedAt *time.Time) (Match, error) {
-	value, err := restoreMatch(id, home, away, scheduledAt, location, status, version, createdAt, updatedAt, deletedAt)
+func RestoreMatch(id MatchID, home, away team.ID, scheduledAt time.Time, location string, status MatchStatus, createdAt, updatedAt time.Time, deletedAt *time.Time) (Match, error) {
+	value, err := restoreMatch(id, home, away, scheduledAt, location, status, createdAt, updatedAt, deletedAt)
 	if err != nil {
 		return Match{}, fmt.Errorf("%w: %v", ErrCorruptedMatch, err)
 	}
 	return value, nil
 }
 
-func restoreMatch(id MatchID, home, away team.ID, scheduledAt time.Time, location string, status MatchStatus, version uint64, createdAt, updatedAt time.Time, deletedAt *time.Time) (Match, error) {
+func restoreMatch(id MatchID, home, away team.ID, scheduledAt time.Time, location string, status MatchStatus, createdAt, updatedAt time.Time, deletedAt *time.Time) (Match, error) {
 	location = strings.TrimSpace(location)
 	switch {
 	case id == "":
@@ -61,8 +59,6 @@ func restoreMatch(id MatchID, home, away team.ID, scheduledAt time.Time, locatio
 		return Match{}, errors.New("scheduled time is required")
 	case !status.Valid():
 		return Match{}, errors.New("invalid match status")
-	case version == 0:
-		return Match{}, errors.New("match version must be positive")
 	case createdAt.IsZero() || updatedAt.IsZero():
 		return Match{}, errors.New("match timestamps are required")
 	case updatedAt.Before(createdAt):
@@ -70,7 +66,7 @@ func restoreMatch(id MatchID, home, away team.ID, scheduledAt time.Time, locatio
 	case deletedAt != nil && deletedAt.Before(createdAt):
 		return Match{}, errors.New("match deleted time precedes creation")
 	}
-	return Match{id: id, homeTeamID: home, awayTeamID: away, scheduledAt: scheduledAt, location: location, status: status, version: version, createdAt: createdAt, updatedAt: updatedAt, deletedAt: copyTime(deletedAt)}, nil
+	return Match{id: id, homeTeamID: home, awayTeamID: away, scheduledAt: scheduledAt, location: location, status: status, createdAt: createdAt, updatedAt: updatedAt, deletedAt: copyTime(deletedAt)}, nil
 }
 
 func (s MatchStatus) Valid() bool { return s >= MatchScheduled && s <= MatchCancelled }
@@ -81,7 +77,6 @@ func (m Match) AwayTeamID() team.ID    { return m.awayTeamID }
 func (m Match) ScheduledAt() time.Time { return m.scheduledAt }
 func (m Match) Location() string       { return m.location }
 func (m Match) Status() MatchStatus    { return m.status }
-func (m Match) Version() uint64        { return m.version }
 func (m Match) CreatedAt() time.Time   { return m.createdAt }
 func (m Match) UpdatedAt() time.Time   { return m.updatedAt }
 func (m Match) DeletedAt() *time.Time  { return copyTime(m.deletedAt) }
@@ -90,7 +85,7 @@ func (m *Match) Update(home, away team.ID, scheduledAt time.Time, location strin
 	if m.deletedAt != nil {
 		return ErrMatchNotFound
 	}
-	updated, err := restoreMatch(m.id, home, away, scheduledAt, location, m.status, m.version+1, m.createdAt, now, nil)
+	updated, err := restoreMatch(m.id, home, away, scheduledAt, location, m.status, m.createdAt, now, nil)
 	if err != nil {
 		return err
 	}
@@ -102,7 +97,7 @@ func (m *Match) SetStatus(status MatchStatus, now time.Time) error {
 	if m.deletedAt != nil {
 		return ErrMatchNotFound
 	}
-	updated, err := restoreMatch(m.id, m.homeTeamID, m.awayTeamID, m.scheduledAt, m.location, status, m.version+1, m.createdAt, now, nil)
+	updated, err := restoreMatch(m.id, m.homeTeamID, m.awayTeamID, m.scheduledAt, m.location, status, m.createdAt, now, nil)
 	if err == nil {
 		*m = updated
 	}
@@ -116,7 +111,7 @@ func (m *Match) Delete(now time.Time) error {
 	if now.Before(m.createdAt) {
 		return errors.New("match deleted time precedes creation")
 	}
-	m.deletedAt, m.updatedAt, m.version = copyTime(&now), now, m.version+1
+	m.deletedAt, m.updatedAt = copyTime(&now), now
 	return nil
 }
 

@@ -11,7 +11,7 @@ import (
 type Repository interface {
 	Create(context.Context, Record) error
 	Get(context.Context, ID) (Record, error)
-	Update(context.Context, Record, uint64) error
+	Update(context.Context, Record) error
 }
 
 type PlayerRepository interface {
@@ -58,11 +58,10 @@ func (s *Service) Update(ctx context.Context, id ID, content, reflection string)
 	if err != nil {
 		return Record{}, err
 	}
-	expected := value.Version()
 	if err := value.Update(content, reflection, s.clock.Now()); err != nil {
 		return Record{}, err
 	}
-	if err := s.repository.Update(ctx, value, expected); err != nil {
+	if err := s.repository.Update(ctx, value); err != nil {
 		return Record{}, err
 	}
 	return value, nil
@@ -73,9 +72,8 @@ func (s *Service) Delete(ctx context.Context, id ID) error {
 	if err != nil {
 		return err
 	}
-	expected := value.Version()
 	if err := value.Delete(s.clock.Now()); err != nil {
 		return err
 	}
-	return s.repository.Update(ctx, value, expected)
+	return s.repository.Update(ctx, value)
 }

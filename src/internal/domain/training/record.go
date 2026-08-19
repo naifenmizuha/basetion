@@ -12,10 +12,9 @@ import (
 type ID string
 
 var (
-	ErrNotFound        = errors.New("training record not found")
-	ErrAlreadyExists   = errors.New("training record already exists for player and date")
-	ErrVersionConflict = errors.New("training record version conflict")
-	ErrCorruptedData   = errors.New("corrupted training record data")
+	ErrNotFound      = errors.New("training record not found")
+	ErrAlreadyExists = errors.New("training record already exists for player and date")
+	ErrCorruptedData = errors.New("corrupted training record data")
 )
 
 // Date is a calendar date without a time zone or time-of-day.
@@ -63,25 +62,24 @@ type Record struct {
 	trainingDate Date
 	content      string
 	reflection   string
-	version      uint64
 	createdAt    time.Time
 	updatedAt    time.Time
 	deletedAt    *time.Time
 }
 
 func New(id ID, playerID player.ID, trainingDate Date, content, reflection string, now time.Time) (Record, error) {
-	return restore(id, playerID, trainingDate, content, reflection, 1, now, now, nil)
+	return restore(id, playerID, trainingDate, content, reflection, now, now, nil)
 }
 
-func Restore(id ID, playerID player.ID, trainingDate Date, content, reflection string, version uint64, createdAt, updatedAt time.Time, deletedAt *time.Time) (Record, error) {
-	record, err := restore(id, playerID, trainingDate, content, reflection, version, createdAt, updatedAt, deletedAt)
+func Restore(id ID, playerID player.ID, trainingDate Date, content, reflection string, createdAt, updatedAt time.Time, deletedAt *time.Time) (Record, error) {
+	record, err := restore(id, playerID, trainingDate, content, reflection, createdAt, updatedAt, deletedAt)
 	if err != nil {
 		return Record{}, fmt.Errorf("%w: %v", ErrCorruptedData, err)
 	}
 	return record, nil
 }
 
-func restore(id ID, playerID player.ID, trainingDate Date, content, reflection string, version uint64, createdAt, updatedAt time.Time, deletedAt *time.Time) (Record, error) {
+func restore(id ID, playerID player.ID, trainingDate Date, content, reflection string, createdAt, updatedAt time.Time, deletedAt *time.Time) (Record, error) {
 	content = strings.TrimSpace(content)
 	reflection = strings.TrimSpace(reflection)
 	switch {
@@ -93,8 +91,6 @@ func restore(id ID, playerID player.ID, trainingDate Date, content, reflection s
 		return Record{}, errors.New("training date is required")
 	case content == "":
 		return Record{}, errors.New("training content is required")
-	case version == 0:
-		return Record{}, errors.New("training record version must be positive")
 	case createdAt.IsZero() || updatedAt.IsZero():
 		return Record{}, errors.New("training record timestamps are required")
 	case updatedAt.Before(createdAt):
@@ -102,7 +98,7 @@ func restore(id ID, playerID player.ID, trainingDate Date, content, reflection s
 	case deletedAt != nil && deletedAt.Before(createdAt):
 		return Record{}, errors.New("training record deleted time precedes creation")
 	}
-	return Record{id: id, playerID: playerID, trainingDate: trainingDate, content: content, reflection: reflection, version: version, createdAt: createdAt, updatedAt: updatedAt, deletedAt: cloneTime(deletedAt)}, nil
+	return Record{id: id, playerID: playerID, trainingDate: trainingDate, content: content, reflection: reflection, createdAt: createdAt, updatedAt: updatedAt, deletedAt: cloneTime(deletedAt)}, nil
 }
 
 func (r Record) ID() ID                { return r.id }
@@ -110,7 +106,6 @@ func (r Record) PlayerID() player.ID   { return r.playerID }
 func (r Record) TrainingDate() Date    { return r.trainingDate }
 func (r Record) Content() string       { return r.content }
 func (r Record) Reflection() string    { return r.reflection }
-func (r Record) Version() uint64       { return r.version }
 func (r Record) CreatedAt() time.Time  { return r.createdAt }
 func (r Record) UpdatedAt() time.Time  { return r.updatedAt }
 func (r Record) DeletedAt() *time.Time { return cloneTime(r.deletedAt) }
@@ -120,7 +115,7 @@ func (r *Record) Update(content, reflection string, now time.Time) error {
 	if r.Deleted() {
 		return ErrNotFound
 	}
-	updated, err := restore(r.id, r.playerID, r.trainingDate, content, reflection, r.version+1, r.createdAt, now, nil)
+	updated, err := restore(r.id, r.playerID, r.trainingDate, content, reflection, r.createdAt, now, nil)
 	if err != nil {
 		return err
 	}
@@ -135,7 +130,7 @@ func (r *Record) Delete(now time.Time) error {
 	if now.Before(r.createdAt) {
 		return errors.New("training record deleted time precedes creation")
 	}
-	r.deletedAt, r.updatedAt, r.version = cloneTime(&now), now, r.version+1
+	r.deletedAt, r.updatedAt = cloneTime(&now), now
 	return nil
 }
 

@@ -6,3 +6,5 @@ mod dep 'just/deps.just'
 mod db 'just/db.just'
 # Test commands.
 mod test 'just/test.just'
+# Regenerate PostgreSQL query bindings with the pinned sqlc version.
+mod sqlc 'just/sqlc.just'

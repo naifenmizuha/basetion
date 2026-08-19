@@ -1,0 +1,9 @@
+ALTER TABLE teams DROP COLUMN IF EXISTS version;
+ALTER TABLE players DROP COLUMN IF EXISTS version;
+ALTER TABLE matches DROP COLUMN IF EXISTS version;
+ALTER TABLE lineups DROP COLUMN IF EXISTS version;
+ALTER TABLE training_records DROP COLUMN IF EXISTS version;
+ALTER TABLE plays DROP COLUMN IF EXISTS version;
+ALTER TABLE play_pitching_results DROP COLUMN IF EXISTS version;
+ALTER TABLE play_runner_results DROP COLUMN IF EXISTS version;
+ALTER TABLE play_fielding_results DROP COLUMN IF EXISTS version;

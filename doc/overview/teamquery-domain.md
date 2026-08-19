@@ -6,10 +6,8 @@
 
 ## 查询契约
 
-Team Query 领域服务定义模型可见的可编程只读查询边界。`Describe` 返回 Lua 5.1 运行时约定和渐进式 topic 目录；未指定 topic 时返回顶层目录，精确请求父 topic 时返回子项，叶子 topic 返回调用参数、结果字段和示例。
+Team Query 是模型可见的可编程只读查询边界。`Describe` 返回 Lua 5.1 运行时约定和渐进式 topic 目录；根目录包含 `runtime`、`team`、`player`、`game`，精确请求父 topic 返回子项，叶子 topic 返回参数、结果字段和示例。叶子的 `available` 同时要求所属模块和 Executor 声明的具体 topic 可用，因此已注册模块不会把未实现能力误报为可调用。
 
-当前预声明 `roster`、`game`、`lineup`、`training`、`analysis` 五个能力模块。服务从 Executor 的能力列表标记可用性；当前组合根注入球队、名单、比赛和自训记录只读领域服务，因此除分析外均可用。`Query` 验证请求模块后，将模块名与程序封装为 `Query` 交给 Executor。
+当前叶子为 `team.list`、`player.list`、`game.list`、`game.summaries`、`game.records`、`game.lineups` 和 `game.performances`。球员和比赛接口使用姓名化投影；比赛详情、阵容和表现都接受统一的参与球队、日期范围和数量限制。训练查询尚未接入这个姓名化 Lua 协议。
 
-`roster.teams` 和 `roster.players` 读取球队与名单；`game.matches`、`game.match`、`game.plays`、`game.score` 读取比赛事实、完整比赛过程与比分快照；`lineup.list` 读取比赛阵容；`training.records` 按球员和可选起止日期读取每日自训记录。Team Query 不定义平行的业务 View 或 PostgreSQL Reader 端口，Lua 基础设施只负责把领域服务返回的对象转换为只读 table。
-
-查询程序不能为空且最多 32 KiB。校验通过后服务委托只读 `Executor` 抽象，并为执行错误补充球队查询上下文。领域模块不依赖 Lua 实现或 Eino 工具协议。
+`Query` 校验模块名、可用性、32 KiB 程序上限和非空程序，再将模块与程序交给 `Executor`。执行错误会附加球队查询上下文。领域模块只定义模型工具协议，不依赖 Lua 实现、PostgreSQL 或 Eino。

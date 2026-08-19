@@ -1,19 +1,7 @@
-# Create the fixed development database from database.dev in config/config.toml.
-create:
-    cd {{justfile_directory()}} && python3 ./scripts/manage_dev_db.py create
-
-# Create, migrate, and load the fixed development database with demo data.
-init:
-    cd {{justfile_directory()}} && python3 ./scripts/manage_dev_db.py init
-
-# Clear fixed development business data and reload demo data.
+# Recreate the fixed development database from current migrations and demo data.
 reset:
+    @echo "正在重建 basetion_dev 并载入演示数据；这会删除该开发库中的全部既有数据。"
     cd {{justfile_directory()}} && python3 ./scripts/manage_dev_db.py reset
 
-# Verify the fixed integration database is ready without creating or deleting it.
 check:
     cd {{justfile_directory()}} && python3 ./scripts/manage_dev_db.py check
-
-# Clear test data without loading development fixtures.
-test-reset:
-    cd {{justfile_directory()}} && python3 ./scripts/manage_dev_db.py test-reset

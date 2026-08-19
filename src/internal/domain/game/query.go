@@ -5,22 +5,138 @@ import (
 	"errors"
 	"time"
 
-	"github.com/naifenmizuha/basetion/src/internal/domain/team"
+	"github.com/naifenmizuha/basetion/src/internal/domain/player"
 )
 
 type MatchFilter struct {
-	TeamID   team.ID
-	From, To *time.Time
-	Status   *MatchStatus
+	ParticipantNames           []string
+	ScheduledFrom, ScheduledTo *time.Time
+	Limit                      int
+}
+type MatchView struct {
+	ScheduledAt                          time.Time
+	HomeTeamName, AwayTeamName, Location string
+	Status                               MatchStatus
+}
+type Result uint8
+
+const (
+	ResultPending Result = iota
+	ResultHomeWin
+	ResultAwayWin
+	ResultDraw
+	ResultCancelled
+)
+
+type MatchSummaryView struct {
+	MatchView
+	HomeScore, AwayScore *int
+	Result               Result
+}
+type PlayerIdentityView struct {
+	Name, TeamName string
+	JerseyNumber   uint8
+}
+type SituationView struct {
+	Outs                 uint8
+	HomeScore, AwayScore uint16
+	Runners              [3]*PlayerIdentityView
+}
+type PitchEventView struct {
+	Sequence        uint16
+	Pitcher, Batter PlayerIdentityView
+	Result          PitchResult
+	Balls, Strikes  uint8
+	PitchType       string
+	Velocity        *float64
+	Zone            *uint8
+	Description     string
+}
+type RunnerOutcomeView struct {
+	Sequence            uint16
+	Runner              PlayerIdentityView
+	Result              RunnerResult
+	FromBase            uint8
+	ToBase              *uint8
+	OutRecorded, Scored bool
+	ChargedPitcher      *PlayerIdentityView
+	Earned              *bool
+	RBIBatter           *PlayerIdentityView
+	Description         string
+}
+type FieldingOutcomeView struct {
+	Sequence    uint16
+	Fielder     PlayerIdentityView
+	Position    player.PositionFlags
+	Result      FieldingResult
+	Description string
+}
+type PlayEventView struct {
+	Sequence                uint32
+	Inning                  uint16
+	Half                    Half
+	BattingOrder            uint8
+	Batter, StartingPitcher PlayerIdentityView
+	Situation               SituationView
+	BattingResult           BattingResult
+	ResultDescription       string
+	Pitches                 []PitchEventView
+	RunnerOutcomes          []RunnerOutcomeView
+	FieldingOutcomes        []FieldingOutcomeView
+}
+type MatchRecordView struct {
+	Summary MatchSummaryView
+	Events  []PlayEventView
+}
+type MatchLineupsView struct {
+	Match   MatchView
+	Lineups []LineupView
+}
+type LineupView struct {
+	TeamName      string
+	Kind          LineupKind
+	VariantNumber uint16
+	VariantName   string
+	Entries       []LineupEntryView
+}
+type LineupEntryView struct {
+	Player       PlayerIdentityView
+	BattingOrder uint8
+	Position     player.PositionFlags
+}
+type OffenseLineView struct {
+	Player                                                                                               PlayerIdentityView
+	PA, AB, H, Singles, Doubles, Triples, HomeRuns, Walks, HitByPitch, Strikeouts, RBI, Runs, TotalBases uint
+	AVG, OBP, SLG, OPS                                                                                   *float64
+}
+type PitchingLineView struct {
+	Player                                                                                                                       PlayerIdentityView
+	BattersFaced, Pitches, CalledStrikes, SwingingStrikes, Hits, HomeRuns, Walks, HitByPitch, Strikeouts, Runs, EarnedRuns, Outs uint
+}
+type FieldingLineView struct {
+	Player                   PlayerIdentityView
+	Putouts, Assists, Errors uint
+}
+type PerformanceLimitsView struct {
+	FieldingOpportunitiesUnavailable bool
+	EarnedRunsRequireExplicitMark    bool
+	UnrecordedPitchFactsExcluded     bool
+}
+type MatchPlayerPerformanceView struct {
+	Match    MatchView
+	Offense  []OffenseLineView
+	Pitching []PitchingLineView
+	Fielding []FieldingLineView
+	Limits   PerformanceLimitsView
 }
 
 type QueryRepository interface {
-	ListMatches(context.Context) ([]Match, error)
-	GetMatch(context.Context, MatchID) (Match, error)
-	ListLineups(context.Context, MatchID) ([]Lineup, error)
-	ListPlays(context.Context, MatchID) ([]Play, error)
+	ListMatches(context.Context, MatchFilter) ([]MatchView, error)
+	SummarizeMatches(context.Context, MatchFilter) ([]MatchSummaryView, error)
+	GetMatchRecords(context.Context, MatchFilter) ([]MatchRecordView, error)
+	ListMatchLineups(context.Context, MatchFilter) ([]MatchLineupsView, error)
+	AnalyzeMatchPlayers(context.Context, MatchFilter) ([]MatchPlayerPerformanceView, error)
 }
-
 type QueryService struct{ repository QueryRepository }
 
 func NewQueryService(repository QueryRepository) (*QueryService, error) {
@@ -29,100 +145,45 @@ func NewQueryService(repository QueryRepository) (*QueryService, error) {
 	}
 	return &QueryService{repository: repository}, nil
 }
-
-func (s *QueryService) ListMatches(ctx context.Context, filter MatchFilter) ([]Match, error) {
-	if filter.Status != nil && !filter.Status.Valid() {
-		return nil, errors.New("invalid match status filter")
-	}
-	values, err := s.repository.ListMatches(ctx)
-	if err != nil {
+func (s *QueryService) ListMatches(ctx context.Context, filter MatchFilter) ([]MatchView, error) {
+	if err := validateMatchFilter(filter); err != nil {
 		return nil, err
 	}
-	result := make([]Match, 0, len(values))
-	for _, v := range values {
-		if filter.TeamID != "" && v.HomeTeamID() != filter.TeamID && v.AwayTeamID() != filter.TeamID {
-			continue
-		}
-		if filter.From != nil && v.ScheduledAt().Before(*filter.From) {
-			continue
-		}
-		if filter.To != nil && v.ScheduledAt().After(*filter.To) {
-			continue
-		}
-		if filter.Status != nil && v.Status() != *filter.Status {
-			continue
-		}
-		result = append(result, v)
-	}
-	return result, nil
+	return s.repository.ListMatches(ctx, filter)
 }
-func (s *QueryService) GetMatch(ctx context.Context, id MatchID) (Match, error) {
-	return s.repository.GetMatch(ctx, id)
-}
-func (s *QueryService) GetDetail(ctx context.Context, id MatchID) (Detail, error) {
-	record, err := s.GetGameRecord(ctx, id)
-	if err != nil {
-		return Detail{}, err
-	}
-	return Detail{Match: record.Match, Lineups: record.Lineups, Plays: record.Plays}, nil
-}
-
-func (s *QueryService) GetGameRecord(ctx context.Context, id MatchID) (GameRecord, error) {
-	m, err := s.repository.GetMatch(ctx, id)
-	if err != nil {
-		return GameRecord{}, err
-	}
-	ls, err := s.repository.ListLineups(ctx, id)
-	if err != nil {
-		return GameRecord{}, err
-	}
-	ps, err := s.repository.ListPlays(ctx, id)
-	if err != nil {
-		return GameRecord{}, err
-	}
-	return GameRecord{Match: m, Lineups: ls, Plays: ps}, nil
-}
-func (s *QueryService) ListLineups(ctx context.Context, id MatchID, teamID team.ID) ([]Lineup, error) {
-	values, err := s.repository.ListLineups(ctx, id)
-	if err != nil {
+func (s *QueryService) SummarizeMatches(ctx context.Context, filter MatchFilter) ([]MatchSummaryView, error) {
+	if err := validateMatchFilter(filter); err != nil {
 		return nil, err
 	}
-	if teamID == "" {
-		return values, nil
-	}
-	result := make([]Lineup, 0, len(values))
-	for _, v := range values {
-		if v.TeamID() == teamID {
-			result = append(result, v)
-		}
-	}
-	return result, nil
+	return s.repository.SummarizeMatches(ctx, filter)
 }
-func (s *QueryService) ListPlays(ctx context.Context, id MatchID) ([]Play, error) {
-	return s.repository.ListPlays(ctx, id)
+func (s *QueryService) GetMatchRecords(ctx context.Context, filter MatchFilter) ([]MatchRecordView, error) {
+	if err := validateMatchFilter(filter); err != nil {
+		return nil, err
+	}
+	return s.repository.GetMatchRecords(ctx, filter)
 }
-
-type ScoreSnapshot struct {
-	Score *Score
-	Final bool
+func (s *QueryService) ListMatchLineups(ctx context.Context, filter MatchFilter) ([]MatchLineupsView, error) {
+	if err := validateMatchFilter(filter); err != nil {
+		return nil, err
+	}
+	return s.repository.ListMatchLineups(ctx, filter)
 }
-
-func (s *QueryService) CurrentScore(ctx context.Context, id MatchID) (ScoreSnapshot, error) {
-	m, err := s.repository.GetMatch(ctx, id)
-	if err != nil {
-		return ScoreSnapshot{}, err
+func (s *QueryService) AnalyzeMatchPlayers(ctx context.Context, filter MatchFilter) ([]MatchPlayerPerformanceView, error) {
+	if err := validateMatchFilter(filter); err != nil {
+		return nil, err
 	}
-	plays, err := s.repository.ListPlays(ctx, id)
-	if err != nil {
-		return ScoreSnapshot{}, err
+	return s.repository.AnalyzeMatchPlayers(ctx, filter)
+}
+func validateMatchFilter(filter MatchFilter) error {
+	if len(filter.ParticipantNames) > 2 {
+		return errors.New("match filter accepts at most two participant names")
 	}
-	var score *Score
-	var latest uint32
-	for _, play := range plays {
-		if play.Sequence() >= latest {
-			after := play.After()
-			latest, score = play.Sequence(), &Score{Home: after.HomeScore, Away: after.AwayScore}
-		}
+	if filter.ScheduledFrom != nil && filter.ScheduledTo != nil && filter.ScheduledFrom.After(*filter.ScheduledTo) {
+		return errors.New("match scheduled range is invalid")
 	}
-	return ScoreSnapshot{Score: score, Final: m.Status() == MatchFinal}, nil
+	if filter.Limit < 0 {
+		return errors.New("match limit must not be negative")
+	}
+	return nil
 }

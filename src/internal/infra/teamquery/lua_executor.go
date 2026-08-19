@@ -11,7 +11,6 @@ import (
 
 	"github.com/naifenmizuha/basetion/src/internal/domain/game"
 	"github.com/naifenmizuha/basetion/src/internal/domain/player"
-	"github.com/naifenmizuha/basetion/src/internal/domain/roster"
 	"github.com/naifenmizuha/basetion/src/internal/domain/team"
 	querydomain "github.com/naifenmizuha/basetion/src/internal/domain/teamquery"
 	"github.com/naifenmizuha/basetion/src/internal/domain/training"
@@ -52,19 +51,19 @@ func DefaultLimits() Limits {
 type LuaExecutor struct {
 	limits   Limits
 	teams    *team.QueryService
-	roster   *roster.QueryService
+	players  *player.QueryService
 	game     *game.QueryService
 	training *training.QueryService
 }
 
 type Option func(*LuaExecutor) error
 
-func WithRosterServices(teams *team.QueryService, roster *roster.QueryService) Option {
+func WithTeamPlayerServices(teams *team.QueryService, players *player.QueryService) Option {
 	return func(executor *LuaExecutor) error {
-		if teams == nil || roster == nil {
-			return errors.New("team and roster query services are required")
+		if teams == nil || players == nil {
+			return errors.New("team and player query services are required")
 		}
-		executor.teams, executor.roster = teams, roster
+		executor.teams, executor.players = teams, players
 		return nil
 	}
 }
@@ -110,14 +109,28 @@ func NewLuaExecutor(limits Limits, options ...Option) (*LuaExecutor, error) {
 
 func (e *LuaExecutor) AvailableModules() []string {
 	var result []string
-	if e.teams != nil && e.roster != nil {
-		result = append(result, "roster")
+	if e.teams != nil {
+		result = append(result, "team")
+	}
+	if e.players != nil {
+		result = append(result, "player")
 	}
 	if e.game != nil {
-		result = append(result, "game", "lineup")
+		result = append(result, "game")
 	}
-	if e.training != nil {
-		result = append(result, "training")
+	return result
+}
+
+func (e *LuaExecutor) AvailableTopics() []string {
+	var result []string
+	if e.teams != nil {
+		result = append(result, "team.list")
+	}
+	if e.players != nil {
+		result = append(result, "player.list")
+	}
+	if e.game != nil {
+		result = append(result, "game.list", "game.summaries", "game.records", "game.lineups", "game.performances")
 	}
 	return result
 }
@@ -252,26 +265,21 @@ func (e *LuaExecutor) newTeamProxy(ctx context.Context, state *lua.LState, expli
 	backing.RawSetString("null", null)
 	for _, module := range modules {
 		switch module {
-		case "roster":
-			if e.teams == nil || e.roster == nil {
-				return nil, errors.New("roster module is unavailable")
+		case "team":
+			if e.teams == nil {
+				return nil, errors.New("team module is unavailable")
 			}
-			backing.RawSetString("roster", newRosterProxy(ctx, state, e.teams, e.roster, explicitArrays))
+			backing.RawSetString("team", newTeamModule(ctx, state, e.teams, explicitArrays))
+		case "player":
+			if e.players == nil {
+				return nil, errors.New("player module is unavailable")
+			}
+			backing.RawSetString("player", newPlayerModule(ctx, state, e.players, explicitArrays))
 		case "game":
 			if e.game == nil {
 				return nil, errors.New("game module is unavailable")
 			}
-			backing.RawSetString("game", newGameProxy(ctx, state, e.game, explicitArrays))
-		case "lineup":
-			if e.game == nil {
-				return nil, errors.New("lineup module is unavailable")
-			}
-			backing.RawSetString("lineup", newLineupProxy(ctx, state, e.game, explicitArrays))
-		case "training":
-			if e.training == nil {
-				return nil, errors.New("training module is unavailable")
-			}
-			backing.RawSetString("training", newTrainingProxy(ctx, state, e.training, explicitArrays))
+			backing.RawSetString("game", newGameModule(ctx, state, e.game, explicitArrays))
 		default:
 			return nil, fmt.Errorf("unsupported lua module %q", module)
 		}
@@ -361,7 +369,7 @@ var positionNames = map[string]player.PositionFlags{
 	"outfielder":  player.PositionOutfielder,
 }
 
-func newRosterProxy(ctx context.Context, state *lua.LState, teams *team.QueryService, service *roster.QueryService, explicitArrays map[*lua.LTable]struct{}) *lua.LUserData {
+func newRosterProxy(ctx context.Context, state *lua.LState, teams *team.QueryService, service *player.QueryService, explicitArrays map[*lua.LTable]struct{}) *lua.LUserData {
 	backing := state.NewTable()
 	backing.RawSetString("teams", state.NewFunction(func(state *lua.LState) int {
 		activeOnly := false
@@ -397,19 +405,10 @@ func newRosterProxy(ctx context.Context, state *lua.LState, teams *team.QuerySer
 			return 0
 		}
 		filterTable := state.CheckTable(1)
-		teamID := string(lua.LVAsString(filterTable.RawGetString("team_id")))
-		if teamID == "" {
-			state.RaiseError("roster.players requires team_id")
-			return 0
-		}
-		filter := roster.PlayerFilter{TeamID: team.ID(teamID)}
-		if value := filterTable.RawGetString("on_date"); value != lua.LNil {
-			parsed, err := roster.ParseDate(string(lua.LVAsString(value)))
-			if err != nil {
-				state.RaiseError("invalid roster on_date: %v", err)
-				return 0
-			}
-			filter.OnDate = &parsed
+		filter := player.PlayerFilter{TeamName: string(lua.LVAsString(filterTable.RawGetString("team_name")))}
+		if value := filterTable.RawGetString("jersey_number"); value != lua.LNil {
+			jersey := uint8(lua.LVAsNumber(value))
+			filter.JerseyNumber = &jersey
 		}
 		if value := filterTable.RawGetString("position_any"); value != lua.LNil {
 			positions, ok := value.(*lua.LTable)
@@ -426,19 +425,15 @@ func newRosterProxy(ctx context.Context, state *lua.LState, teams *team.QuerySer
 				filter.PositionAny |= flag
 			})
 		}
-		players, err := service.ListPlayers(ctx, filter)
+		players, err := service.List(ctx, filter)
 		if err != nil {
 			state.RaiseError("list roster players: %v", err)
 			return 0
 		}
 		result := state.NewTable()
 		explicitArrays[result] = struct{}{}
-		activeDate := roster.DateFromTime(time.Now())
-		if filter.OnDate != nil {
-			activeDate = *filter.OnDate
-		}
 		for _, current := range players {
-			result.Append(rosterPlayerToLua(state, current, activeDate, explicitArrays))
+			result.Append(rosterPlayerToLua(state, current, explicitArrays))
 		}
 		state.Push(result)
 		return 1
@@ -453,25 +448,13 @@ func newRosterProxy(ctx context.Context, state *lua.LState, teams *team.QuerySer
 	return proxy
 }
 
-func rosterPlayerToLua(state *lua.LState, current roster.Member, activeDate roster.Date, explicitArrays map[*lua.LTable]struct{}) *lua.LTable {
+func rosterPlayerToLua(state *lua.LState, current player.PlayerView, explicitArrays map[*lua.LTable]struct{}) *lua.LTable {
 	entry := state.NewTable()
-	entry.RawSetString("membership_id", lua.LString(current.Membership.ID()))
-	entry.RawSetString("team_id", lua.LString(current.Membership.TeamID()))
-	entry.RawSetString("player_id", lua.LString(current.Player.ID()))
-	entry.RawSetString("name", lua.LString(current.Player.Name()))
-	entry.RawSetString("jersey_number", lua.LNumber(current.Membership.JerseyNumber()))
-	entry.RawSetString("batting_hands", stringsToLua(state, handNames(current.Player.Batting()), explicitArrays))
-	entry.RawSetString("throwing_hands", stringsToLua(state, handNames(current.Player.Throwing()), explicitArrays))
-	entry.RawSetString("positions", stringsToLua(state, positionFlagNames(current.Player.Positions()), explicitArrays))
-	entry.RawSetString("joined_at", lua.LString(current.Membership.JoinedAt().String()))
-	if current.Membership.LeftAt() == nil {
-		null := state.NewUserData()
-		null.Value = nullValue{}
-		entry.RawSetString("left_at", null)
-	} else {
-		entry.RawSetString("left_at", lua.LString(current.Membership.LeftAt().String()))
-	}
-	entry.RawSetString("active", lua.LBool(current.ActiveOn(activeDate)))
+	entry.RawSetString("name", lua.LString(current.Name))
+	entry.RawSetString("team_name", lua.LString(current.TeamName))
+	entry.RawSetString("jersey_number", lua.LNumber(current.JerseyNumber))
+	entry.RawSetString("positions", stringsToLua(state, positionFlagNames(current.Positions), explicitArrays))
+	entry.RawSetString("active", lua.LBool(current.Active))
 	return entry
 }
 
@@ -485,14 +468,16 @@ func newGameProxy(ctx context.Context, state *lua.LState, service *game.QuerySer
 		filter := game.MatchFilter{}
 		if state.GetTop() == 1 {
 			table := state.CheckTable(1)
-			filter.TeamID = team.ID(lua.LVAsString(table.RawGetString("team_id")))
+			if value := table.RawGetString("team_name"); value != lua.LNil {
+				filter.ParticipantNames = []string{value.String()}
+			}
 			if value := table.RawGetString("date_from"); value != lua.LNil {
 				parsed, err := parseQueryTime(value.String(), false)
 				if err != nil {
 					state.RaiseError("invalid game date_from: %v", err)
 					return 0
 				}
-				filter.From = &parsed
+				filter.ScheduledFrom = &parsed
 			}
 			if value := table.RawGetString("date_to"); value != lua.LNil {
 				parsed, err := parseQueryTime(value.String(), true)
@@ -500,15 +485,7 @@ func newGameProxy(ctx context.Context, state *lua.LState, service *game.QuerySer
 					state.RaiseError("invalid game date_to: %v", err)
 					return 0
 				}
-				filter.To = &parsed
-			}
-			if value := table.RawGetString("status"); value != lua.LNil {
-				parsed, ok := parseMatchStatus(value.String())
-				if !ok {
-					state.RaiseError("invalid game status %q", value.String())
-					return 0
-				}
-				filter.Status = &parsed
+				filter.ScheduledTo = &parsed
 			}
 		}
 		values, err := service.ListMatches(ctx, filter)
@@ -519,96 +496,24 @@ func newGameProxy(ctx context.Context, state *lua.LState, service *game.QuerySer
 		result := state.NewTable()
 		explicitArrays[result] = struct{}{}
 		for _, value := range values {
-			result.Append(matchToLua(state, value))
-		}
-		state.Push(result)
-		return 1
-	}))
-	backing.RawSetString("match", state.NewFunction(func(state *lua.LState) int {
-		id := requiredID(state, "game.match", "match_id")
-		if id == "" {
-			return 0
-		}
-		value, err := service.GetMatch(ctx, game.MatchID(id))
-		if err != nil {
-			state.RaiseError("get match: %v", err)
-			return 0
-		}
-		state.Push(matchToLua(state, value))
-		return 1
-	}))
-	backing.RawSetString("plays", state.NewFunction(func(state *lua.LState) int {
-		id := requiredID(state, "game.plays", "match_id")
-		if id == "" {
-			return 0
-		}
-		values, err := service.ListPlays(ctx, game.MatchID(id))
-		if err != nil {
-			state.RaiseError("list plays: %v", err)
-			return 0
-		}
-		result := state.NewTable()
-		explicitArrays[result] = struct{}{}
-		for _, value := range values {
-			result.Append(playToLua(state, value, explicitArrays))
-		}
-		state.Push(result)
-		return 1
-	}))
-	backing.RawSetString("score", state.NewFunction(func(state *lua.LState) int {
-		id := requiredID(state, "game.score", "match_id")
-		if id == "" {
-			return 0
-		}
-		value, err := service.CurrentScore(ctx, game.MatchID(id))
-		if err != nil {
-			state.RaiseError("get game score: %v", err)
-			return 0
-		}
-		result := state.NewTable()
-		result.RawSetString("known", lua.LBool(value.Score != nil))
-		result.RawSetString("final", lua.LBool(value.Final))
-		if value.Score == nil {
-			setNull(state, result, "home_score")
-			setNull(state, result, "away_score")
-		} else {
-			result.RawSetString("home_score", lua.LNumber(value.Score.Home))
-			result.RawSetString("away_score", lua.LNumber(value.Score.Away))
+			result.Append(matchViewToLua(state, value))
 		}
 		state.Push(result)
 		return 1
 	}))
 	return readOnlyProxy(state, "game", backing)
 }
-
-func newLineupProxy(ctx context.Context, state *lua.LState, service *game.QueryService, explicitArrays map[*lua.LTable]struct{}) *lua.LUserData {
-	backing := state.NewTable()
-	backing.RawSetString("list", state.NewFunction(func(state *lua.LState) int {
-		if state.GetTop() != 1 {
-			state.RaiseError("lineup.list requires one filter table")
-			return 0
-		}
-		table := state.CheckTable(1)
-		id := lua.LVAsString(table.RawGetString("match_id"))
-		if id == "" {
-			state.RaiseError("lineup.list requires match_id")
-			return 0
-		}
-		teamID := team.ID(lua.LVAsString(table.RawGetString("team_id")))
-		values, err := service.ListLineups(ctx, game.MatchID(id), teamID)
-		if err != nil {
-			state.RaiseError("list lineups: %v", err)
-			return 0
-		}
-		result := state.NewTable()
-		explicitArrays[result] = struct{}{}
-		for _, value := range values {
-			result.Append(lineupToLua(state, value, explicitArrays))
-		}
-		state.Push(result)
-		return 1
-	}))
-	return readOnlyProxy(state, "lineup", backing)
+func newLineupProxy(_ context.Context, state *lua.LState, _ *game.QueryService, _ map[*lua.LTable]struct{}) *lua.LUserData {
+	return readOnlyProxy(state, "lineup", state.NewTable())
+}
+func matchViewToLua(state *lua.LState, value game.MatchView) *lua.LTable {
+	result := state.NewTable()
+	result.RawSetString("scheduled_at", lua.LString(value.ScheduledAt.Format(time.RFC3339)))
+	result.RawSetString("home_team_name", lua.LString(value.HomeTeamName))
+	result.RawSetString("away_team_name", lua.LString(value.AwayTeamName))
+	result.RawSetString("location", lua.LString(value.Location))
+	result.RawSetString("status", lua.LNumber(value.Status))
+	return result
 }
 
 func readOnlyProxy(state *lua.LState, name string, backing *lua.LTable) *lua.LUserData {

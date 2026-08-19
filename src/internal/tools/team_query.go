@@ -35,7 +35,7 @@ func NewTeamQuery(service *domain.Service) (tool.InvokableTool, error) {
 	}
 	return toolutils.InferTool(
 		TeamQueryToolName,
-		"发现并查询棒球队只读数据。先用 describe 获取顶层目录或按需加载帮助 topic；再用 query 执行定义了 main(team) 的受限 Lua 5.1 程序。该工具不能修改任何球队数据。",
+		"发现并查询球队、当前球员与比赛的只读数据。先用 describe 获取顶层目录或按需加载帮助 topic；再用 query 执行定义了 main(team) 的受限 Lua 5.1 程序。该工具不能修改任何球队数据。",
 		func(ctx context.Context, input teamQueryInput) (teamQueryOutput, error) {
 			switch strings.TrimSpace(input.Mode) {
 			case "describe":

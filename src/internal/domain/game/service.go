@@ -12,16 +12,14 @@ import (
 type MatchRepository interface {
 	Create(context.Context, Match) error
 	Get(context.Context, MatchID) (Match, error)
-	GetForUpdate(context.Context, MatchID) (Match, error)
-	Update(context.Context, Match, uint64) error
+	Update(context.Context, Match) error
 	List(context.Context) ([]Match, error)
 }
 type LineupRepository interface {
 	Create(context.Context, Lineup) error
 	Get(context.Context, MatchID, team.ID, LineupKind, uint16) (Lineup, error)
-	GetForUpdate(context.Context, MatchID, team.ID, LineupKind, uint16) (Lineup, error)
-	Replace(context.Context, Lineup, uint64, time.Time) error
-	SoftDelete(context.Context, MatchID, team.ID, LineupKind, uint16, uint64, time.Time) error
+	Replace(context.Context, Lineup, time.Time) error
+	SoftDelete(context.Context, Lineup, time.Time) error
 	SoftDeleteByMatch(context.Context, MatchID, time.Time) error
 	ListByMatch(context.Context, MatchID) ([]Lineup, error)
 	NameOccupied(context.Context, MatchID, team.ID, string, LineupKind, uint16) (bool, error)
@@ -29,17 +27,16 @@ type LineupRepository interface {
 type PlayRepository interface {
 	Create(context.Context, Play) error
 	Get(context.Context, PlayID) (Play, error)
-	GetForUpdate(context.Context, PlayID) (Play, error)
-	Replace(context.Context, Play, uint64, time.Time) error
-	SoftDelete(context.Context, PlayID, uint64, time.Time) error
+	Replace(context.Context, Play, time.Time) error
+	SoftDelete(context.Context, Play, time.Time) error
 	SoftDeleteByMatch(context.Context, MatchID, time.Time) error
 	ListByMatch(context.Context, MatchID) ([]Play, error)
 }
 type TeamRepository interface {
-	GetForUpdate(context.Context, team.ID) (team.Team, error)
+	Get(context.Context, team.ID) (team.Team, error)
 }
 type PlayerRepository interface {
-	GetForUpdate(context.Context, player.ID) (player.Player, error)
+	Get(context.Context, player.ID) (player.Player, error)
 }
 type Repositories struct {
 	Matches MatchRepository
@@ -69,10 +66,10 @@ func NewService(uow UnitOfWork, clock Clock) (*Service, error) {
 
 func (s *Service) CreateMatch(ctx context.Context, value Match) error {
 	return s.uow.WithinGameTransaction(ctx, func(r Repositories) error {
-		if _, e := r.Teams.GetForUpdate(ctx, value.HomeTeamID()); e != nil {
+		if _, e := r.Teams.Get(ctx, value.HomeTeamID()); e != nil {
 			return e
 		}
-		if _, e := r.Teams.GetForUpdate(ctx, value.AwayTeamID()); e != nil {
+		if _, e := r.Teams.Get(ctx, value.AwayTeamID()); e != nil {
 			return e
 		}
 		return r.Matches.Create(ctx, value)
@@ -91,21 +88,20 @@ func (s *Service) CreateMatchWith(ctx context.Context, id MatchID, home, away te
 func (s *Service) UpdateMatch(ctx context.Context, id MatchID, home, away team.ID, scheduled time.Time, location string) (Match, error) {
 	var result Match
 	e := s.uow.WithinGameTransaction(ctx, func(r Repositories) error {
-		v, e := r.Matches.GetForUpdate(ctx, id)
+		v, e := r.Matches.Get(ctx, id)
 		if e != nil {
 			return e
 		}
-		if _, e = r.Teams.GetForUpdate(ctx, home); e != nil {
+		if _, e = r.Teams.Get(ctx, home); e != nil {
 			return e
 		}
-		if _, e = r.Teams.GetForUpdate(ctx, away); e != nil {
+		if _, e = r.Teams.Get(ctx, away); e != nil {
 			return e
 		}
-		expected := v.Version()
 		if e = v.Update(home, away, scheduled, location, s.clock.Now()); e != nil {
 			return e
 		}
-		if e = r.Matches.Update(ctx, v, expected); e != nil {
+		if e = r.Matches.Update(ctx, v); e != nil {
 			return e
 		}
 		result = v
@@ -116,15 +112,14 @@ func (s *Service) UpdateMatch(ctx context.Context, id MatchID, home, away team.I
 func (s *Service) SetMatchStatus(ctx context.Context, id MatchID, status MatchStatus) (Match, error) {
 	var result Match
 	e := s.uow.WithinGameTransaction(ctx, func(r Repositories) error {
-		v, e := r.Matches.GetForUpdate(ctx, id)
+		v, e := r.Matches.Get(ctx, id)
 		if e != nil {
 			return e
 		}
-		expected := v.Version()
 		if e = v.SetStatus(status, s.clock.Now()); e != nil {
 			return e
 		}
-		if e = r.Matches.Update(ctx, v, expected); e != nil {
+		if e = r.Matches.Update(ctx, v); e != nil {
 			return e
 		}
 		result = v
@@ -134,11 +129,11 @@ func (s *Service) SetMatchStatus(ctx context.Context, id MatchID, status MatchSt
 }
 func (s *Service) DeleteMatch(ctx context.Context, id MatchID) error {
 	return s.uow.WithinGameTransaction(ctx, func(r Repositories) error {
-		v, e := r.Matches.GetForUpdate(ctx, id)
+		v, e := r.Matches.Get(ctx, id)
 		if e != nil {
 			return e
 		}
-		now, expected := s.clock.Now(), v.Version()
+		now := s.clock.Now()
 		if e = r.Plays.SoftDeleteByMatch(ctx, id, now); e != nil {
 			return e
 		}
@@ -148,7 +143,7 @@ func (s *Service) DeleteMatch(ctx context.Context, id MatchID) error {
 		if e = v.Delete(now); e != nil {
 			return e
 		}
-		return r.Matches.Update(ctx, v, expected)
+		return r.Matches.Update(ctx, v)
 	})
 }
 
@@ -180,7 +175,7 @@ func (s *Service) CreateLineupWith(ctx context.Context, matchID MatchID, teamID 
 func (s *Service) ReplaceLineup(ctx context.Context, value Lineup) (Lineup, error) {
 	var result Lineup
 	e := s.uow.WithinGameTransaction(ctx, func(r Repositories) error {
-		current, e := r.Lineups.GetForUpdate(ctx, value.MatchID(), value.TeamID(), value.Kind(), value.VariantNumber())
+		current, e := r.Lineups.Get(ctx, value.MatchID(), value.TeamID(), value.Kind(), value.VariantNumber())
 		if e != nil {
 			return e
 		}
@@ -194,11 +189,11 @@ func (s *Service) ReplaceLineup(ctx context.Context, value Lineup) (Lineup, erro
 		if occupied {
 			return errors.New("lineup name is already used")
 		}
-		replacement, e := RestoreLineup(value.MatchID(), value.TeamID(), value.Kind(), int(value.VariantNumber()), value.VariantName(), value.Entries(), current.Version()+1, current.CreatedAt(), s.clock.Now(), nil)
+		replacement, e := RestoreLineup(value.MatchID(), value.TeamID(), value.Kind(), int(value.VariantNumber()), value.VariantName(), value.Entries(), current.CreatedAt(), s.clock.Now(), nil)
 		if e != nil {
 			return e
 		}
-		if e = r.Lineups.Replace(ctx, replacement, current.Version(), s.clock.Now()); e != nil {
+		if e = r.Lineups.Replace(ctx, replacement, s.clock.Now()); e != nil {
 			return e
 		}
 		result = replacement
@@ -215,11 +210,11 @@ func (s *Service) ReplaceLineupWith(ctx context.Context, matchID MatchID, teamID
 }
 func (s *Service) DeleteLineup(ctx context.Context, matchID MatchID, teamID team.ID, kind LineupKind, number uint16) error {
 	return s.uow.WithinGameTransaction(ctx, func(r Repositories) error {
-		v, e := r.Lineups.GetForUpdate(ctx, matchID, teamID, kind, number)
+		v, e := r.Lineups.Get(ctx, matchID, teamID, kind, number)
 		if e != nil {
 			return e
 		}
-		return r.Lineups.SoftDelete(ctx, matchID, teamID, kind, number, v.Version(), s.clock.Now())
+		return r.Lineups.SoftDelete(ctx, v, s.clock.Now())
 	})
 }
 
@@ -238,18 +233,15 @@ func (s *Service) CreatePlay(ctx context.Context, value Play) error {
 		return r.Plays.Create(ctx, value)
 	})
 }
-func (s *Service) ReplacePlay(ctx context.Context, id PlayID, expectedVersion uint64, draft PlayDraft) (Play, error) {
+func (s *Service) ReplacePlay(ctx context.Context, id PlayID, draft PlayDraft) (Play, error) {
 	var result Play
 	e := s.uow.WithinGameTransaction(ctx, func(r Repositories) error {
-		current, e := r.Plays.GetForUpdate(ctx, id)
+		current, e := r.Plays.Get(ctx, id)
 		if e != nil {
 			return e
 		}
-		if current.Version() != expectedVersion {
-			return ErrPlayVersionConflict
-		}
 		draft.ID, draft.MatchID = id, current.MatchID()
-		value, e := RestorePlay(draft, current.Version()+1, current.CreatedAt(), s.clock.Now(), nil)
+		value, e := RestorePlay(draft, current.CreatedAt(), s.clock.Now(), nil)
 		if e != nil {
 			return e
 		}
@@ -263,7 +255,7 @@ func (s *Service) ReplacePlay(ctx context.Context, id PlayID, expectedVersion ui
 		if e = validatePlayNeighbors(value, plays, id); e != nil {
 			return e
 		}
-		if e = r.Plays.Replace(ctx, value, expectedVersion, s.clock.Now()); e != nil {
+		if e = r.Plays.Replace(ctx, value, s.clock.Now()); e != nil {
 			return e
 		}
 		result = value
@@ -271,16 +263,13 @@ func (s *Service) ReplacePlay(ctx context.Context, id PlayID, expectedVersion ui
 	})
 	return result, e
 }
-func (s *Service) DeletePlay(ctx context.Context, id PlayID, expectedVersion uint64) error {
+func (s *Service) DeletePlay(ctx context.Context, id PlayID) error {
 	return s.uow.WithinGameTransaction(ctx, func(r Repositories) error {
-		v, e := r.Plays.GetForUpdate(ctx, id)
+		v, e := r.Plays.Get(ctx, id)
 		if e != nil {
 			return e
 		}
-		if v.Version() != expectedVersion {
-			return ErrPlayVersionConflict
-		}
-		return r.Plays.SoftDelete(ctx, id, expectedVersion, s.clock.Now())
+		return r.Plays.SoftDelete(ctx, v, s.clock.Now())
 	})
 }
 
@@ -295,10 +284,10 @@ func (s *Service) CreateGameRecord(ctx context.Context, value GameRecord) error 
 		return err
 	}
 	return s.uow.WithinGameTransaction(ctx, func(r Repositories) error {
-		if _, err := r.Teams.GetForUpdate(ctx, value.Match.HomeTeamID()); err != nil {
+		if _, err := r.Teams.Get(ctx, value.Match.HomeTeamID()); err != nil {
 			return err
 		}
-		if _, err := r.Teams.GetForUpdate(ctx, value.Match.AwayTeamID()); err != nil {
+		if _, err := r.Teams.Get(ctx, value.Match.AwayTeamID()); err != nil {
 			return err
 		}
 		if err := r.Matches.Create(ctx, value.Match); err != nil {
@@ -325,7 +314,7 @@ func (s *Service) CreateGameRecord(ctx context.Context, value GameRecord) error 
 }
 
 func validateLineupReferences(ctx context.Context, r Repositories, v Lineup) error {
-	m, e := r.Matches.GetForUpdate(ctx, v.MatchID())
+	m, e := r.Matches.Get(ctx, v.MatchID())
 	if e != nil {
 		return e
 	}
@@ -333,14 +322,14 @@ func validateLineupReferences(ctx context.Context, r Repositories, v Lineup) err
 		return errors.New("lineup team does not participate in match")
 	}
 	for _, entry := range v.Entries() {
-		if _, e = r.Players.GetForUpdate(ctx, entry.PlayerID()); e != nil {
+		if _, e = r.Players.Get(ctx, entry.PlayerID()); e != nil {
 			return e
 		}
 	}
 	return nil
 }
 func validatePlayReferences(ctx context.Context, r Repositories, v Play) error {
-	if _, e := r.Matches.GetForUpdate(ctx, v.MatchID()); e != nil {
+	if _, e := r.Matches.Get(ctx, v.MatchID()); e != nil {
 		return e
 	}
 	ids := []player.ID{v.BatterID(), v.StartingPitcherID()}
@@ -372,7 +361,7 @@ func validatePlayReferences(ctx context.Context, r Repositories, v Play) error {
 			continue
 		}
 		seen[id] = true
-		if _, e := r.Players.GetForUpdate(ctx, id); e != nil {
+		if _, e := r.Players.Get(ctx, id); e != nil {
 			return e
 		}
 	}

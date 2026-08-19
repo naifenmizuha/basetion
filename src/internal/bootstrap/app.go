@@ -13,7 +13,6 @@ import (
 	"github.com/naifenmizuha/basetion/src/internal/config"
 	"github.com/naifenmizuha/basetion/src/internal/domain/game"
 	"github.com/naifenmizuha/basetion/src/internal/domain/player"
-	"github.com/naifenmizuha/basetion/src/internal/domain/roster"
 	"github.com/naifenmizuha/basetion/src/internal/domain/team"
 	domainteamquery "github.com/naifenmizuha/basetion/src/internal/domain/teamquery"
 	"github.com/naifenmizuha/basetion/src/internal/domain/training"
@@ -70,9 +69,9 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 		fmt.Fprintf(stderr, "初始化球队读取服务失败: %v\n", err)
 		return 1
 	}
-	rosterReadService, err := roster.NewQueryService(database.RosterReader())
+	playerReadService, err := player.NewQueryService(database.PlayerReader())
 	if err != nil {
-		fmt.Fprintf(stderr, "初始化名单读取服务失败: %v\n", err)
+		fmt.Fprintf(stderr, "初始化球员读取服务失败: %v\n", err)
 		return 1
 	}
 	gameReadService, err := game.NewQueryService(database)
@@ -85,7 +84,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 		fmt.Fprintf(stderr, "初始化自训记录读取服务失败: %v\n", err)
 		return 1
 	}
-	teamQueryExecutor, err := infrateamquery.NewLuaExecutor(infrateamquery.DefaultLimits(), infrateamquery.WithRosterServices(teamReadService, rosterReadService), infrateamquery.WithGameService(gameReadService), infrateamquery.WithTrainingService(trainingReadService))
+	teamQueryExecutor, err := infrateamquery.NewLuaExecutor(infrateamquery.DefaultLimits(), infrateamquery.WithTeamPlayerServices(teamReadService, playerReadService), infrateamquery.WithGameService(gameReadService), infrateamquery.WithTrainingService(trainingReadService))
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化球队查询 Lua 执行器失败: %v\n", err)
 		return 1
@@ -106,14 +105,9 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 		fmt.Fprintf(stderr, "初始化球队写入服务失败: %v\n", err)
 		return 1
 	}
-	playerService, err := player.NewService(database.Players(), clock)
+	playerService, err := player.NewService(database.Players(), database, clock)
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化球员写入服务失败: %v\n", err)
-		return 1
-	}
-	rosterService, err := roster.NewService(database, clock)
-	if err != nil {
-		fmt.Fprintf(stderr, "初始化名单写入服务失败: %v\n", err)
 		return 1
 	}
 	gameService, err := game.NewService(database, clock)
@@ -126,7 +120,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 		fmt.Fprintf(stderr, "初始化自训记录写入服务失败: %v\n", err)
 		return 1
 	}
-	teamModifyTool, err := basetiontools.NewTeamModify(teamService, playerService, rosterService, gameService, trainingService)
+	teamModifyTool, err := basetiontools.NewTeamModify(teamService, playerService, gameService, trainingService)
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化球队修改工具失败: %v\n", err)
 		return 1

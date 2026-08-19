@@ -47,14 +47,13 @@ WITH records(player_id, day_offset, content, reflection) AS (
         ('00000000-0000-0000-0000-000000000049'::uuid, 11, '边线飞球和反方向击球练习。', '边线球处理稳，击球时重心有些后仰。'),
         ('00000000-0000-0000-0000-000000000050'::uuid, 13, '一垒补位、轻牛棚和全身拉伸。', '手臂状态轻松，补位时沟通清楚。')
 )
-INSERT INTO training_records(id, player_id, training_date, content, reflection, version, created_at, updated_at)
+INSERT INTO training_records(id, player_id, training_date, content, reflection, created_at, updated_at)
 SELECT
     ('00000000-0000-0000-0001-' || lpad(row_number() OVER (ORDER BY player_id, day_offset)::text, 12, '0'))::uuid,
     player_id,
     current_date - day_offset,
     content,
     reflection,
-    1,
     now() - day_offset * interval '1 day',
     now() - day_offset * interval '1 day'
 FROM records;
