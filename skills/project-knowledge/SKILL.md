@@ -37,4 +37,4 @@ Eino Checkpoint 用于恢复一次被中断的 Agent 运行。Basetion 当前未
 
 - 只陈述本 Skill 明确给出的项目事实，不根据相似项目补全能力。
 - 用户询问实现细节时可以使用上述模块名称；一般功能介绍应优先使用用户任务语言。
-- 涉及具体球队数据时停止使用本 Skill 推断，改为加载 `manage-team`。
+- 涉及具体球队数据时停止使用本 Skill 推断：只读事实或比赛分析加载 `query-team-data`；球队和球员维护加载 `manage-roster`；比赛安排或阵容维护加载 `manage-game-setup`；完整比赛录入加载 `record-game`；训练记录维护加载 `manage-training`。

@@ -46,6 +46,7 @@ type testCase struct {
 }
 
 type testResult struct {
+	SchemaVersion int                         `json:"schema_version"`
 	RunID         string                      `json:"run_id"`
 	StartedAt     time.Time                   `json:"started_at"`
 	FinishedAt    time.Time                   `json:"finished_at"`
@@ -261,7 +262,8 @@ func runTestTurn(ctx context.Context, conversation Conversation, runID, runName,
 	trace := harness.NewTurnTrace()
 	events, runErr := collectTestEvents(conversation.Run(harness.WithTurnTrace(ctx, trace), sessionID, testCase.Prompt))
 	result := testResult{
-		RunID: runID, StartedAt: startedAt, FinishedAt: time.Now().UTC(), RunName: runName,
+		SchemaVersion: 2,
+		RunID:         runID, StartedAt: startedAt, FinishedAt: time.Now().UTC(), RunName: runName,
 		SessionID: sessionID, SessionIndex: sessionIndex + 1, TurnIndex: turnIndex + 1,
 		Prompt: testCase.Prompt, ExpectTools: testCase.ExpectTools, ExpectSkills: testCase.ExpectSkills, ForbidTools: testCase.ForbidTools,
 		Status: "completed", Events: events, ModelRequests: trace.Snapshot(),

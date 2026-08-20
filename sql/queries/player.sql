@@ -7,6 +7,19 @@ SELECT id::text, team_id::text, jersey_number, name, batting_flags, throwing_fla
 FROM players
 WHERE id = $1 AND deleted_at IS NULL;
 
+-- name: GetPlayersByTeamAndJerseys :many
+WITH requested AS (
+    SELECT
+        split_part(value, '/', 1)::uuid AS team_id,
+        split_part(value, '/', 2)::smallint AS jersey_number
+    FROM unnest(sqlc.arg(keys)::text[]) AS requested(value)
+)
+SELECT p.id::text AS id, p.team_id::text AS team_id, p.jersey_number, p.name, p.batting_flags, p.throwing_flags, p.position_flags, p.active, p.created_at, p.updated_at, p.deleted_at
+FROM requested r
+JOIN players p ON p.team_id = r.team_id AND p.jersey_number = r.jersey_number
+WHERE p.deleted_at IS NULL
+ORDER BY p.team_id, p.jersey_number;
+
 -- name: UpdatePlayer :execrows
 UPDATE players
 SET jersey_number = $1,

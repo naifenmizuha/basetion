@@ -49,19 +49,53 @@ type UnitOfWork interface {
 	WithinGameTransaction(context.Context, func(Repositories) error) error
 }
 type Clock interface{ Now() time.Time }
+type IDGenerator func() string
+type TeamNameRepository interface {
+	GetByNames(context.Context, []string) ([]team.Team, error)
+}
+type PlayerJerseyKey struct {
+	TeamID       team.ID
+	JerseyNumber int
+}
+type PlayerJerseyRepository interface {
+	GetByTeamAndJerseys(context.Context, []PlayerJerseyKey) ([]player.Player, error)
+}
+type DirectRepositories struct {
+	Matches MatchRepository
+	Lineups LineupRepository
+	Plays   PlayRepository
+	Teams   TeamNameRepository
+	Players PlayerJerseyRepository
+}
 type Service struct {
-	uow   UnitOfWork
-	clock Clock
+	uow         UnitOfWork
+	clock       Clock
+	direct      *DirectRepositories
+	idGenerator IDGenerator
 }
 
-func NewService(uow UnitOfWork, clock Clock) (*Service, error) {
+type ServiceOption func(*Service)
+
+func WithDirectRepositories(repositories DirectRepositories) ServiceOption {
+	return func(service *Service) { service.direct = &repositories }
+}
+
+func WithIDGenerator(generator IDGenerator) ServiceOption {
+	return func(service *Service) { service.idGenerator = generator }
+}
+
+func NewService(uow UnitOfWork, clock Clock, options ...ServiceOption) (*Service, error) {
 	if uow == nil {
 		return nil, errors.New("game unit of work is required")
 	}
 	if clock == nil {
 		return nil, errors.New("game clock is required")
 	}
-	return &Service{uow: uow, clock: clock}, nil
+	service := &Service{uow: uow, clock: clock}
+	for _, option := range options {
+		option(service)
+	}
+	return service, nil
 }
 
 func (s *Service) CreateMatch(ctx context.Context, value Match) error {

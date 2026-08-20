@@ -19,4 +19,4 @@
 
 `Render` 顺序消费 AgentEvent：reasoning 标记为 `[思考]`，助手文本按流式块累计并以 `[回复]` 输出，工具调用和结果显示工具名、call ID 与内容，动作显示为 `[动作]`，正常关闭输出 `[完成]`。入口层不负责 Session、模型或工具业务规则。
 
-批量入口不复用终端渲染，而是保留结构化事件、模型请求 Trace、状态栏、用量和每轮预期字段供评测脚本读取。`scripts/evaluate_test_results.py <results.jsonl>` 只读取 JSONL，输出同名 `.evaluation.json` 与终端摘要；它统计轮次与 run 的耗时、并发墙钟时间、token、工具和 Skill，且对运行失败、缺失预期和禁用工具调用返回非零。评测报告不复制提示词、模型输入、工具结果或 reasoning 内容。
+批量入口不复用终端渲染，而是写出 schema version 2 的结构化事件、模型请求 token Trace 和每轮预期字段。`scripts/evaluate_test_results.py <results.jsonl>` 只读取 JSONL，输出同名 `.evaluation.json`、`.report.md` 与终端摘要；它统计轮次与 run 的耗时、并发墙钟时间、token、工具和 Skill，且对运行失败、缺失预期和禁用工具调用返回非零。JSONL 不复制模型输入、状态栏或模型输出；Markdown 报告从结构化事件呈现 Prompt、可见思考、工具调用、工具结果和回复。

@@ -80,3 +80,11 @@ func (s *Store) Teams() *TeamRepository {
 func (s *Store) Training() *TrainingRepository {
 	return &TrainingRepository{queries: sqlcgen.New(s.pool)}
 }
+func (s *Store) DirectGameRepositories() game.DirectRepositories {
+	queries := sqlcgen.New(s.pool)
+	return game.DirectRepositories{
+		Matches: &MatchRepository{queries: queries}, Lineups: &LineupRepository{queries: queries},
+		Plays: &PlayRepository{queries: queries}, Teams: &TeamRepository{queries: queries},
+		Players: &PlayerRepository{queries: queries},
+	}
+}

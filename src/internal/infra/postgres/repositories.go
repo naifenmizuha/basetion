@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/naifenmizuha/basetion/src/internal/domain/game"
 	"github.com/naifenmizuha/basetion/src/internal/domain/player"
 	"github.com/naifenmizuha/basetion/src/internal/domain/team"
 	"github.com/naifenmizuha/basetion/src/internal/infra/postgres/sqlcgen"
@@ -19,9 +20,24 @@ type TeamRepository struct {
 func (r *TeamRepository) Create(ctx context.Context, value team.Team) error {
 	err := r.queries.CreateTeam(ctx, sqlcgen.CreateTeamParams{ID: string(value.ID()), Name: value.Name(), Active: value.Active(), CreatedAt: timestamptz(value.CreatedAt()), UpdatedAt: timestamptz(value.UpdatedAt()), DeletedAt: timestamptzPointer(value.DeletedAt())})
 	if err != nil {
-		return fmt.Errorf("create team: %w", err)
+		return mapTeamNameError(err, "create team")
 	}
 	return nil
+}
+func (r *TeamRepository) GetByNames(ctx context.Context, names []string) ([]team.Team, error) {
+	rows, err := r.queries.GetTeamsByNames(ctx, names)
+	if err != nil {
+		return nil, fmt.Errorf("get teams by names: %w", err)
+	}
+	result := make([]team.Team, 0, len(rows))
+	for _, row := range rows {
+		value, restoreErr := team.RestoreDeleted(team.ID(row.ID), row.Name, row.Active, requiredTimestamp(row.CreatedAt), requiredTimestamp(row.UpdatedAt), timestampTime(row.DeletedAt))
+		if restoreErr != nil {
+			return nil, restoreErr
+		}
+		result = append(result, value)
+	}
+	return result, nil
 }
 func (r *TeamRepository) Get(ctx context.Context, id team.ID) (team.Team, error) {
 	row, err := r.queries.GetTeam(ctx, string(id))
@@ -81,6 +97,25 @@ func (r *PlayerRepository) Get(ctx context.Context, id player.ID) (player.Player
 	}
 	return player.RestoreDeleted(player.ID(row.ID), team.ID(row.TeamID), int(row.JerseyNumber), row.Name, player.HandFlags(row.BattingFlags), player.HandFlags(row.ThrowingFlags), player.PositionFlags(row.PositionFlags), row.Active, requiredTimestamp(row.CreatedAt), requiredTimestamp(row.UpdatedAt), timestampTime(row.DeletedAt))
 }
+func (r *PlayerRepository) GetByTeamAndJerseys(ctx context.Context, keys []game.PlayerJerseyKey) ([]player.Player, error) {
+	encoded := make([]string, len(keys))
+	for index, key := range keys {
+		encoded[index] = fmt.Sprintf("%s/%d", key.TeamID, key.JerseyNumber)
+	}
+	rows, err := r.queries.GetPlayersByTeamAndJerseys(ctx, encoded)
+	if err != nil {
+		return nil, fmt.Errorf("get players by team and jerseys: %w", err)
+	}
+	result := make([]player.Player, 0, len(rows))
+	for _, row := range rows {
+		value, restoreErr := player.RestoreDeleted(player.ID(row.ID), team.ID(row.TeamID), int(row.JerseyNumber), row.Name, player.HandFlags(row.BattingFlags), player.HandFlags(row.ThrowingFlags), player.PositionFlags(row.PositionFlags), row.Active, requiredTimestamp(row.CreatedAt), requiredTimestamp(row.UpdatedAt), timestampTime(row.DeletedAt))
+		if restoreErr != nil {
+			return nil, restoreErr
+		}
+		result = append(result, value)
+	}
+	return result, nil
+}
 
 func (r *PlayerRepository) Update(ctx context.Context, value player.Player) error {
 	updated, err := r.queries.UpdatePlayer(ctx, sqlcgen.UpdatePlayerParams{JerseyNumber: int16(value.JerseyNumber()), Name: value.Name(), BattingFlags: int16(value.Batting()), ThrowingFlags: int16(value.Throwing()), PositionFlags: int16(value.Positions()), Active: value.Active(), UpdatedAt: timestamptz(value.UpdatedAt()), DeletedAt: timestamptzPointer(value.DeletedAt()), ID: string(value.ID())})
@@ -115,6 +150,13 @@ func mapJerseyError(err error, operation string) error {
 	var databaseError *pgconn.PgError
 	if errors.As(err, &databaseError) && databaseError.Code == "23505" && databaseError.ConstraintName == "uq_players_active_team_jersey" {
 		return player.ErrJerseyOccupied
+	}
+	return fmt.Errorf("%s: %w", operation, err)
+}
+func mapTeamNameError(err error, operation string) error {
+	var databaseError *pgconn.PgError
+	if errors.As(err, &databaseError) && databaseError.Code == "23505" && databaseError.ConstraintName == "uq_teams_active_name" {
+		return team.ErrNameOccupied
 	}
 	return fmt.Errorf("%s: %w", operation, err)
 }

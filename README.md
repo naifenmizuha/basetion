@@ -44,7 +44,7 @@ go run ./src/cmd/basetion --profile run --session-id demo "继续说明会话层
 
 CLI 会依次显示模型明确返回的可见思考摘要、工具调用、工具结果、最终回答和完成状态。默认 Callback 日志不记录提示词、私有推理或工具完整载荷；仅在 TOML 中设置 `agent.unsafe_debug_data=true` 才会输出调试载荷，请勿在生产环境开启。
 
-`skills/` 是必需的核心运行资源。启动时会校验 `project-knowledge` 和 `manage-team`；目录缺失、Skill 格式错误或必需 Skill 缺失都会导致启动失败。项目知识问题按需加载 `project-knowledge`；球队结构化数据任务先加载 `manage-team`，再通过只读 `team_query` 或预定义写入 `team_modify` 工具执行。
+`skills/` 是必需的核心运行资源。启动时会校验 `project-knowledge`、`query-team-data`、`manage-roster`、`manage-game-setup`、`record-game` 和 `manage-training`；目录缺失、Skill 格式错误或必需 Skill 缺失都会导致启动失败。项目知识问题按需加载 `project-knowledge`；球队结构化数据按只读查询、名单维护、比赛安排、完整比赛录入和训练维护分别加载对应专用 Skill，再通过只读查询或预定义写入工具执行。
 
 ## Session 与 Checkpoint
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
+	"github.com/google/uuid"
 	"github.com/naifenmizuha/basetion/src/internal/application/conversation"
 	"github.com/naifenmizuha/basetion/src/internal/config"
 	"github.com/naifenmizuha/basetion/src/internal/domain/game"
@@ -128,7 +129,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 		fmt.Fprintf(stderr, "初始化球员写入服务失败: %v\n", err)
 		return 1
 	}
-	gameService, err := game.NewService(database, clock)
+	gameService, err := game.NewService(database, clock, game.WithDirectRepositories(database.DirectGameRepositories()), game.WithIDGenerator(uuid.NewString))
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化比赛写入服务失败: %v\n", err)
 		return 1

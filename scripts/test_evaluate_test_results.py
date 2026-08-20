@@ -9,14 +9,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from evaluate_test_results import EvaluationInputError, evaluate_file
+from evaluate_test_results import EvaluationInputError, evaluate_file, write_markdown_report
 
 
 def record(**overrides: object) -> dict[str, object]:
     value: dict[str, object] = {
+        "schema_version": 2,
         "run_id": "run-1",
         "run_name": "team-roster",
         "session_id": "session-1",
+        "session_index": 1,
         "turn_index": 1,
         "started_at": "2026-08-20T03:00:00Z",
         "finished_at": "2026-08-20T03:00:02.250Z",
@@ -37,12 +39,10 @@ def record(**overrides: object) -> dict[str, object]:
         ],
         "model_requests": [
             {
-                "output": [
-                    {"response_meta": {"token_usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}},
-                    {"response_meta": {"token_usage": {"prompt_tokens": 7, "completion_tokens": 4, "total_tokens": 11}}},
-                ]
+                "index": 1,
+                "token_usage": {"prompt_tokens": 7, "completion_tokens": 4, "total_tokens": 11},
             },
-            {"output": []},
+            {"index": 2},
         ],
     }
     value.update(overrides)
@@ -101,6 +101,30 @@ class EvaluateTestResultsTest(unittest.TestCase):
             temporary.write("not-json\n")
         with self.assertRaises(EvaluationInputError):
             evaluate_file(Path(temporary.name))
+
+    def test_rejects_legacy_schema(self) -> None:
+        with self.assertRaisesRegex(EvaluationInputError, "schema_version"):
+            evaluate_file(self.write_records(record(schema_version=1)))
+
+    def test_writes_human_readable_markdown_trace(self) -> None:
+        value = record(
+            prompt="列出球队",
+            events=[
+                {"type": "message", "message": {"content_blocks": [
+                    {"reasoning": {"openai_extension": {"content": [{"text": "先查询"}]}}},
+                    {"function_tool_call": {"name": "team_query", "call_id": "call-1", "arguments": '{"mode":"query"}'}},
+                    {"function_tool_result": {"name": "team_query", "call_id": "call-1", "content": [{"text": {"text": '{"teams":2}'}}]}},
+                    {"assistant_gen_text": {"text": "共有两支球队。"}},
+                ]}},
+            ],
+        )
+        input_path = self.write_records(value)
+        output_path = input_path.with_suffix(".report.md")
+        self.addCleanup(lambda: output_path.unlink(missing_ok=True))
+        write_markdown_report(output_path, input_path, evaluate_file(input_path))
+        markdown = output_path.read_text(encoding="utf-8")
+        for expected in ("列出球队", "先查询", "team_query", "call-1", "teams", "共有两支球队。"):
+            self.assertIn(expected, markdown)
 
 
 if __name__ == "__main__":

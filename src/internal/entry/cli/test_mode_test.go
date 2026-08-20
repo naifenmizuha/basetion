@@ -81,6 +81,9 @@ prompt = "b1"
 	if len(lines) != 3 {
 		t.Fatalf("result lines=%d data=%s", len(lines), data)
 	}
+	if bytes.Contains(data, []byte(`"input"`)) || bytes.Contains(data, []byte(`"output"`)) || bytes.Contains(data, []byte(`"status_bar"`)) {
+		t.Fatalf("JSONL contains model request contents: %s", data)
+	}
 	seen := make(map[string]int)
 	runForPrompt := make(map[string]string)
 	for _, line := range lines {
@@ -90,6 +93,9 @@ prompt = "b1"
 		}
 		if result.Status != "completed" || result.RunID == "" || result.RunName == "" || result.SessionID == "" || len(result.Events) != 1 {
 			t.Fatalf("unexpected result: %#v", result)
+		}
+		if result.SchemaVersion != 2 {
+			t.Fatalf("schema version=%d", result.SchemaVersion)
 		}
 		seen[result.Prompt]++
 		runForPrompt[result.Prompt] = result.RunName

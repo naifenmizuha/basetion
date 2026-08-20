@@ -4,7 +4,7 @@
 [[test.team-roster]]
 prompt = "查询数据库中所有球队的当前球员名单，并列出球员姓名、球衣号码、打击手、投球手和守备位置。"
 expect_tools = ["team_query"]
-expect_skills = ["manage-team"]
+expect_skills = ["query-team-data"]
 forbid_tools = ["team_modify"]
 
 [[test.team-roster]]

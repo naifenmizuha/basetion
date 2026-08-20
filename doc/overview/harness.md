@@ -20,9 +20,13 @@ Skill Middleware 使用 Eino Ext 本地文件 Backend，从进程当前工作目
 当前必需 Skill 为：
 
 - `project-knowledge`：提供 Basetion 定位、当前能力、六层职责、Session/Checkpoint 区别和明确限制。
-- `manage-team`：区分 `team_fetch` 的完整比赛读取和 `team_query` 的基础事实组合。前者直接读取摘要、记录、阵容或表现；后者在一次 Lua 执行中读取球队、球员、比赛和按实际比赛对象批量取回的 Play，并完成关联、过滤、聚合与最小结果投影。修改时先查询事实，一次加载所需修改说明并获得用户对完整修改批次的确认；多个可独立确定参数的修改合并为一次有序批量调用，并按非原子、遇错中止的结果语义处理失败与未执行步骤。
+- `query-team-data`：只读球队、球员和比赛事实；完整比赛投影优先 `team_fetch`，自由组合基础对象和原子 Play 时使用 `team_query`。
+- `manage-roster`：球队与球员资料、启用状态和背号。
+- `manage-game-setup`：比赛安排、状态和阵容。
+- `record-game`：一次 `game.create` 录入已结束比赛、双方首发和连续 Play。
+- `manage-training`：球员每日自训记录。
 
-Skill 中间件动态提供模型可见的 `skill` 工具；业务工具列表显式注册 `team_fetch`、`team_query` 和 `team_modify`。两个 Skill 均为自包含单文件，当前不使用引用文件或通用文件读取能力。
+Skill 中间件动态提供模型可见的 `skill` 工具；业务工具列表显式注册 `team_fetch`、`team_query` 和 `team_modify`。各 Skill 均为自包含单文件，当前不使用引用文件或通用文件读取能力。
 
 ## 生命周期回调
 

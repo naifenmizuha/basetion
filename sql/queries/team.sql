@@ -7,6 +7,12 @@ SELECT id::text, name, active, created_at, updated_at, deleted_at
 FROM teams
 WHERE id = $1 AND deleted_at IS NULL;
 
+-- name: GetTeamsByNames :many
+SELECT id::text, name, active, created_at, updated_at, deleted_at
+FROM teams
+WHERE name = ANY(sqlc.arg(names)::text[]) AND deleted_at IS NULL
+ORDER BY name;
+
 -- name: UpdateTeam :execrows
 UPDATE teams
 SET name = $1,

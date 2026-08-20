@@ -211,7 +211,7 @@ func TestRuntimeUsesTeamQueryTool(t *testing.T) {
 		{assistantMessage(schema.NewContentBlockChunk(&schema.FunctionToolCall{
 			CallID:    "skill-call",
 			Name:      "skill",
-			Arguments: `{"skill":"manage-team"}`,
+			Arguments: `{"skill":"query-team-data"}`,
 		}, &schema.StreamingMeta{Index: 0}))},
 		{assistantMessage(schema.NewContentBlockChunk(&schema.FunctionToolCall{
 			CallID:    "team-query-call",
@@ -235,7 +235,7 @@ func TestRuntimeUsesTeamQueryTool(t *testing.T) {
 	for _, message := range messages {
 		for _, block := range message.ContentBlocks {
 			if result := block.FunctionToolResult; result != nil {
-				sawSkillResult = sawSkillResult || result.Name == "skill" && result.CallID == "skill-call" && strings.Contains(result.Content[0].String(), "调用相应工具的 `describe`")
+				sawSkillResult = sawSkillResult || result.Name == "skill" && result.CallID == "skill-call" && strings.Contains(result.Content[0].String(), "team_fetch")
 				sawTeamQueryResult = sawTeamQueryResult || result.Name == basetiontools.TeamQueryToolName && result.CallID == "team-query-call" && strings.Contains(result.Content[0].String(), `"total":13`)
 			}
 		}

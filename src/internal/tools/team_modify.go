@@ -33,6 +33,8 @@ type PlayerModifier interface {
 }
 
 type GameModifier interface {
+	CreateCompactGameRecord(context.Context, game.CompactGameRecordDraft) (game.GameCreateProgress, error)
+	CreateNamedGameRecord(context.Context, game.NamedGameRecordDraft) (game.GameCreateProgress, error)
 	CreateMatchWith(context.Context, game.MatchID, team.ID, team.ID, time.Time, string, game.MatchStatus) (game.Match, error)
 	UpdateMatch(context.Context, game.MatchID, team.ID, team.ID, time.Time, string) (game.Match, error)
 	SetMatchStatus(context.Context, game.MatchID, game.MatchStatus) (game.Match, error)
@@ -73,11 +75,13 @@ type teamModifyRequest struct {
 }
 
 type modifyFieldDescription struct {
-	Name        string   `json:"name"`
-	Type        string   `json:"type"`
-	Required    bool     `json:"required"`
-	Description string   `json:"description"`
-	Values      []string `json:"values,omitempty"`
+	Name        string                   `json:"name"`
+	Type        string                   `json:"type"`
+	Required    bool                     `json:"required"`
+	Description string                   `json:"description"`
+	Values      []string                 `json:"values,omitempty"`
+	Fields      []modifyFieldDescription `json:"fields,omitempty"`
+	Item        *modifyFieldDescription  `json:"item,omitempty"`
 }
 
 type modifyTopicSummary struct {
@@ -86,24 +90,36 @@ type modifyTopicSummary struct {
 }
 
 type modifyTopicDescription struct {
-	Name       string                   `json:"name"`
-	Kind       string                   `json:"kind"`
-	Found      bool                     `json:"found"`
-	Summary    string                   `json:"summary,omitempty"`
-	Error      string                   `json:"error,omitempty"`
-	Children   []modifyTopicSummary     `json:"children,omitempty"`
-	Parameters []modifyFieldDescription `json:"parameters,omitempty"`
-	ResultType string                   `json:"result_type,omitempty"`
+	Name        string                   `json:"name"`
+	Kind        string                   `json:"kind"`
+	Found       bool                     `json:"found"`
+	Summary     string                   `json:"summary,omitempty"`
+	Error       string                   `json:"error,omitempty"`
+	Children    []modifyTopicSummary     `json:"children,omitempty"`
+	Parameters  []modifyFieldDescription `json:"parameters,omitempty"`
+	Conventions []string                 `json:"conventions,omitempty"`
+	Invariants  []string                 `json:"invariants,omitempty"`
+	ResultType  string                   `json:"result_type,omitempty"`
 }
 
 type teamModifyOutput struct {
-	Mode      string                   `json:"mode"`
-	Topics    []modifyTopicDescription `json:"topics,omitempty"`
-	Operation string                   `json:"operation,omitempty"`
-	Result    any                      `json:"result,omitempty"`
-	Status    string                   `json:"status,omitempty"`
-	Results   []teamModifyResult       `json:"results,omitempty"`
-	StoppedAt *teamModifyStoppedAt     `json:"stopped_at,omitempty"`
+	Mode           string                   `json:"mode"`
+	Topics         []modifyTopicDescription `json:"topics,omitempty"`
+	Operation      string                   `json:"operation,omitempty"`
+	Result         any                      `json:"result,omitempty"`
+	Status         string                   `json:"status,omitempty"`
+	Results        []teamModifyResult       `json:"results,omitempty"`
+	StoppedAt      *teamModifyStoppedAt     `json:"stopped_at,omitempty"`
+	ContextReceipt *toolContextReceipt      `json:"context_receipt,omitempty"`
+}
+
+// toolContextReceipt is a compact, model-visible record that permits the
+// runtime to replace a completed, potentially large tool-call pair in a later
+// model request. The full pair remains in the session and trace.
+type toolContextReceipt struct {
+	Kind      string `json:"kind"`
+	Operation string `json:"operation"`
+	Summary   string `json:"summary"`
 }
 
 type teamModifyResult struct {
@@ -122,14 +138,23 @@ type teamModifyStoppedAt struct {
 	Reason    string `json:"reason"`
 }
 
+type partialModifyError struct {
+	result any
+	reason string
+}
+
+func (e *partialModifyError) Error() string { return e.reason }
+
 const maxTeamModifyBatchSize = 50
 
 type modifyOperation struct {
-	name       string
-	group      string
-	summary    string
-	parameters []modifyFieldDescription
-	resultType string
+	name        string
+	group       string
+	summary     string
+	parameters  []modifyFieldDescription
+	conventions []string
+	invariants  []string
+	resultType  string
 }
 
 type teamModifyHandler struct {
@@ -189,9 +214,19 @@ func (h *teamModifyHandler) invoke(ctx context.Context, input teamModifyInput) (
 		}
 		result, err := h.execute(ctx, operation, *input.Arguments)
 		if err != nil {
+			var partial *partialModifyError
+			if errors.As(err, &partial) {
+				return teamModifyOutput{Mode: "execute", Operation: operation, Result: partial.result, Status: "partial"}, nil
+			}
 			return teamModifyOutput{}, fmt.Errorf("execute team modify operation %s: %w", operation, err)
 		}
-		return teamModifyOutput{Mode: "execute", Operation: operation, Result: result}, nil
+		output := teamModifyOutput{Mode: "execute", Operation: operation, Result: result}
+		if operation == "game.create" {
+			if progress, ok := result.(game.GameCreateProgress); ok && progress.Status == "succeeded" {
+				output.ContextReceipt = &toolContextReceipt{Kind: "completed_write", Operation: operation, Summary: fmt.Sprintf("已记录 %s（主）对 %s（客）的比赛；已创建 %d 套阵容和 %d 个 Play。", progress.HomeTeamName, progress.AwayTeamName, progress.CompletedLineups, progress.CompletedPlays)}
+			}
+		}
+		return output, nil
 	default:
 		return teamModifyOutput{}, fmt.Errorf("team_modify mode must be describe or execute, got %q", input.Mode)
 	}
@@ -235,9 +270,13 @@ func (h *teamModifyHandler) executeBatch(ctx context.Context, requests []teamMod
 			continue
 		}
 		reason := err.Error()
+		var partial *partialModifyError
+		if errors.As(err, &partial) {
+			result = partial.result
+		}
 		output.Status = "stopped"
 		output.StoppedAt = &teamModifyStoppedAt{Index: index, Key: request.Key, Operation: request.Operation, Reason: reason}
-		output.Results = append(output.Results, teamModifyResult{Index: index, Key: request.Key, Operation: request.Operation, Status: "failed", Error: reason})
+		output.Results = append(output.Results, teamModifyResult{Index: index, Key: request.Key, Operation: request.Operation, Status: "failed", Result: result, Error: reason})
 		for skippedIndex := index + 1; skippedIndex < len(requests); skippedIndex++ {
 			skipped := requests[skippedIndex]
 			output.Results = append(output.Results, teamModifyResult{Index: skippedIndex, Key: skipped.Key, Operation: skipped.Operation, Status: "skipped", Error: fmt.Sprintf("not executed because operation at index %d (%s) failed", index, request.Key)})
@@ -249,7 +288,7 @@ func (h *teamModifyHandler) executeBatch(ctx context.Context, requests []teamMod
 
 func (h *teamModifyHandler) describe(requested []string) []modifyTopicDescription {
 	if len(requested) == 0 {
-		groups := []string{"team", "player", "match", "lineup", "training"}
+		groups := []string{"team", "player", "game", "match", "lineup", "training"}
 		result := make([]modifyTopicDescription, 0, len(groups))
 		for _, group := range groups {
 			result = append(result, h.describeGroup(group))
@@ -264,7 +303,7 @@ func (h *teamModifyHandler) describe(requested []string) []modifyTopicDescriptio
 			continue
 		}
 		seen[name] = struct{}{}
-		if name == "team" || name == "player" || name == "match" || name == "lineup" || name == "training" {
+		if name == "team" || name == "player" || name == "game" || name == "match" || name == "lineup" || name == "training" {
 			result = append(result, h.describeGroup(name))
 			continue
 		}
@@ -277,7 +316,7 @@ func (h *teamModifyHandler) describe(requested []string) []modifyTopicDescriptio
 			result = append(result, modifyTopicDescription{Name: name, Found: false, Error: message})
 			continue
 		}
-		result = append(result, modifyTopicDescription{Name: operation.name, Kind: "operation", Found: true, Summary: operation.summary, Parameters: operation.parameters, ResultType: operation.resultType})
+		result = append(result, modifyTopicDescription{Name: operation.name, Kind: "operation", Found: true, Summary: operation.summary, Parameters: operation.parameters, Conventions: operation.conventions, Invariants: operation.invariants, ResultType: operation.resultType})
 	}
 	return result
 }
@@ -293,7 +332,7 @@ func (h *teamModifyHandler) describeGroup(group string) modifyTopicDescription {
 	return modifyTopicDescription{Name: group, Kind: "group", Found: true, Summary: group + " 数据修改操作。", Children: children}
 }
 
-var modifyOperationOrder = []string{"team.create", "player.create", "player.update", "player.set_active", "player.change_jersey", "match.create", "match.update", "match.set_status", "match.delete", "lineup.create", "lineup.replace", "lineup.delete", "training.create", "training.update", "training.delete"}
+var modifyOperationOrder = []string{"team.create", "player.create", "player.update", "player.set_active", "player.change_jersey", "game.create", "match.create", "match.update", "match.set_status", "match.delete", "lineup.create", "lineup.replace", "lineup.delete", "training.create", "training.update", "training.delete"}
 
 func defaultModifyOperations() map[string]modifyOperation {
 	hands := []string{"left", "right"}
@@ -305,6 +344,7 @@ func defaultModifyOperations() map[string]modifyOperation {
 		{Name: "positions", Type: "string[]", Required: true, Description: "守备位置。", Values: positions},
 	}
 	return map[string]modifyOperation{
+		"game.create":          {name: "game.create", group: "game", summary: "按球队名和背号的紧凑事件流创建一场包含双方首发及全部比赛过程的已结束比赛；服务端推导局面，不使用数据库事务。", parameters: compactGameCreateFields(), conventions: compactGameCreateConventions(), invariants: compactGameCreateInvariants(), resultType: "game_create_progress"},
 		"team.create":          {name: "team.create", group: "team", summary: "创建一个启用的球队。", parameters: []modifyFieldDescription{{Name: "name", Type: "string", Required: true, Description: "球队名称。"}}, resultType: "team"},
 		"player.create":        {name: "player.create", group: "player", summary: "创建一个归属球队的启用球员。", parameters: append([]modifyFieldDescription{{Name: "team_id", Type: "string", Required: true, Description: "所属球队 ID。"}, {Name: "jersey_number", Type: "integer", Required: true, Description: "0 到 99 的球衣号码。"}}, profile...), resultType: "player"},
 		"player.update":        {name: "player.update", group: "player", summary: "更新球员的完整资料。", parameters: append([]modifyFieldDescription{{Name: "player_id", Type: "string", Required: true, Description: "球员 ID。"}}, profile...), resultType: "player"},

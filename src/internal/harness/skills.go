@@ -15,7 +15,7 @@ import (
 
 const defaultSkillsDir = "skills"
 
-var requiredSkillNames = []string{"manage-team", "project-knowledge"}
+var requiredSkillNames = []string{"project-knowledge", "query-team-data", "manage-roster", "manage-game-setup", "record-game", "manage-training"}
 
 func newSkillMiddleware(ctx context.Context) (adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage], error) {
 	backend, err := newSkillBackend(ctx, defaultSkillsDir, requiredSkillNames)

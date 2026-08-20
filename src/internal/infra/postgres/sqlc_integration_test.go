@@ -136,6 +136,42 @@ func TestSQLCPostgresRepositories(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	duplicateTeam, err := team.New(team.ID(uuid.NewString()), homeName, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicateTeamTx, err := tx.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicateTeamErr := (&TeamRepository{queries: sqlcgen.New(duplicateTeamTx)}).Create(ctx, duplicateTeam)
+	if err := duplicateTeamTx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(duplicateTeamErr, team.ErrNameOccupied) {
+		t.Fatalf("duplicate team name error = %v, want %v", duplicateTeamErr, team.ErrNameOccupied)
+	}
+	reusableName := "sqlc reusable " + uuid.NewString()
+	softDeleted, err := team.New(team.ID(uuid.NewString()), reusableName, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := teams.Create(ctx, softDeleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := softDeleted.Delete(now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := teams.Update(ctx, softDeleted); err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := team.New(team.ID(uuid.NewString()), reusableName, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := teams.Create(ctx, replacement); err != nil {
+		t.Fatalf("reuse soft-deleted team name: %v", err)
+	}
 
 	batterID, pitcherID := player.ID(uuid.NewString()), player.ID(uuid.NewString())
 	for _, value := range []struct {
@@ -152,6 +188,18 @@ func TestSQLCPostgresRepositories(t *testing.T) {
 		if err := players.Create(ctx, created); err != nil {
 			t.Fatal(err)
 		}
+	}
+	counter.Reset()
+	batchTeams, err := teams.GetByNames(ctx, []string{awayName, homeName})
+	if err != nil || len(batchTeams) != 2 {
+		t.Fatalf("get teams by names: values=%#v err=%v", batchTeams, err)
+	}
+	batchPlayers, err := players.GetByTeamAndJerseys(ctx, []game.PlayerJerseyKey{{TeamID: homeID, JerseyNumber: 7}, {TeamID: awayID, JerseyNumber: 8}})
+	if err != nil || len(batchPlayers) != 2 {
+		t.Fatalf("get players by team and jerseys: values=%#v err=%v", batchPlayers, err)
+	}
+	if got := counter.count.Load(); got != 2 {
+		t.Fatalf("batch identity query count = %d, want 2", got)
 	}
 	duplicate, err := player.New(player.ID(uuid.NewString()), homeID, 7, "sqlc duplicate", player.HandRight, player.HandRight, player.PositionCatcher, now)
 	if err != nil {
@@ -211,6 +259,32 @@ func TestSQLCPostgresRepositories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	namedService, err := game.NewService(
+		integrationGameUnitOfWork{repositories: gameRepositories}, sqlcClock{now: now},
+		game.WithDirectRepositories(game.DirectRepositories{Matches: gameRepositories.Matches, Lineups: gameRepositories.Lineups, Plays: gameRepositories.Plays, Teams: teams, Players: players}),
+		game.WithIDGenerator(uuid.NewString),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	homeRef := game.PlayerReference{TeamName: homeName, JerseyNumber: 7}
+	awayRef := game.PlayerReference{TeamName: awayName, JerseyNumber: 8}
+	namedDraft := game.NamedGameRecordDraft{
+		HomeTeamName: homeName, AwayTeamName: awayName, ScheduledAt: now.Add(30 * time.Hour).Format(time.RFC3339), Location: "named game field",
+		HomeLineup: game.NamedLineupDraft{Name: "home starters", Entries: []game.NamedLineupEntryDraft{{Player: homeRef, BattingOrder: 1, Position: player.PositionOutfielder}}},
+		AwayLineup: game.NamedLineupDraft{Name: "away starters", Entries: []game.NamedLineupEntryDraft{{Player: awayRef, BattingOrder: 1, Position: player.PositionPitcher}}},
+		Plays:      []game.NamedPlayDraft{{Inning: 1, Half: game.Top, BattingOrder: 1, Batter: awayRef, StartingPitcher: homeRef, Before: game.NamedSituationDraft{}, After: game.NamedSituationDraft{Outs: 1}, BattingResult: game.BattingStrikeout, ResultDescription: "named strikeout", Pitches: []game.NamedPitchDraft{{Pitcher: homeRef, Batter: awayRef, Result: game.PitchSwingingStrike, StrikesBefore: 2, StrikesAfter: 3}}, FieldingOutcomes: []game.NamedFieldingOutcomeDraft{{Fielder: homeRef, Position: player.PositionOutfielder, Result: game.FieldingPutout}}}},
+	}
+	namedProgress, err := namedService.CreateNamedGameRecord(ctx, namedDraft)
+	if err != nil || namedProgress.Status != "succeeded" || namedProgress.CompletedLineups != 2 || namedProgress.CompletedPlays != 1 {
+		t.Fatalf("create named game: progress=%#v err=%v", namedProgress, err)
+	}
+	readStore := &Store{queries: queries}
+	dateFrom, dateTo := now.Add(29*time.Hour), now.Add(31*time.Hour)
+	namedRecords, err := readStore.GetMatchRecords(ctx, game.MatchFilter{ParticipantNames: []string{homeName}, ScheduledFrom: &dateFrom, ScheduledTo: &dateTo})
+	if err != nil || len(namedRecords) != 1 || namedRecords[0].Summary.Location != "named game field" || len(namedRecords[0].Events) != 1 {
+		t.Fatalf("read named game: records=%#v err=%v", namedRecords, err)
+	}
 	matchIDs := make([]game.MatchID, 0, 2)
 	for index := 0; index < 2; index++ {
 		matchID := game.MatchID(uuid.NewString())
@@ -254,8 +328,9 @@ func TestSQLCPostgresRepositories(t *testing.T) {
 		matchIDs = append(matchIDs, matchID)
 	}
 
-	readStore := &Store{queries: queries}
-	filter := game.MatchFilter{ParticipantNames: []string{homeName}}
+	readStore = &Store{queries: queries}
+	originalGamesEnd := now.Add(3 * time.Hour)
+	filter := game.MatchFilter{ParticipantNames: []string{homeName}, ScheduledTo: &originalGamesEnd}
 	counter.Reset()
 	records, err := readStore.GetMatchRecords(ctx, filter)
 	if err != nil {

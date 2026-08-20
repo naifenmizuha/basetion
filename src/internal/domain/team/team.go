@@ -12,6 +12,7 @@ type ID string
 var (
 	ErrNotFound      = errors.New("team not found")
 	ErrInactive      = errors.New("team is inactive")
+	ErrNameOccupied  = errors.New("team name is already occupied")
 	ErrCorruptedData = errors.New("corrupted team data")
 )
 

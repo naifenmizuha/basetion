@@ -14,13 +14,13 @@
 
 ## PostgreSQL 存储与数据库工具
 
-`Store` 使用 pgx 连接已准备好的数据库，提供球队、球员、训练和比赛 Repository，以及 Player/Game 的事务 UnitOfWork。删除关系由领域服务编排，Repository 将 `deleted_at` 作为默认读写边界。球员表直接保存 `team_id` 和 `jersey_number`，部分唯一索引保证未删除球员在同队背号唯一；没有 memberships 表或名单 Repository。比赛逐球明细表名为 `play_pitching_results`。
+`Store` 使用 pgx 连接已准备好的数据库，提供球队、球员、训练和比赛 Repository，以及 Player/Game 的事务 UnitOfWork。`DirectGameRepositories` 将比赛写 Repository 和按名称、球队/背号批量解析的球队、球员 Repository 组合给完整比赛录入服务。删除关系由领域服务编排，Repository 将 `deleted_at` 作为默认读写边界。球员表直接保存 `team_id` 和 `jersey_number`，部分唯一索引保证未删除球员在同队背号唯一；`uq_teams_active_name` 保证未删除球队名称唯一，并把冲突映射为 `team.ErrNameOccupied`；没有 memberships 表或名单 Repository。比赛逐球明细表名为 `play_pitching_results`。
 
 SQL 放在 `sql/queries/`，由 `sqlc.yaml` 为 pgx/v5 生成 `src/internal/infra/postgres/sqlcgen/`。`just sqlc generate` 显式生成绑定，`just sqlc check` 生成后检查该目录没有差异；应用和普通测试命令不会隐式生成。手写适配层只负责领域值与 sqlc 参数/行的转换、事务和数据库错误映射。
 
 `scripts/manage_dev_db.py` 读取 `config/config.toml` 的固定 `database.dev.url`。`just db reset` 重建该库、按文件名顺序执行迁移和 development fixture，随后检查至少两支启用球队、一场已结束比赛、阵容和有效 Play；它会删除开发库全部数据。`just db check` 只验证现有 fixture。脚本不创建临时测试库，也不使用环境变量覆写连接配置。
 
-`scripts/evaluate_test_results.py` 不读取配置、不连接数据库，也不调用模型。它读取批量测试 JSONL，为每个模型请求从流式输出中选择 token usage 最大的快照，避免重复累计流式用量；再根据事件中的函数调用归集业务工具与 `skill` 参数。脚本将耗时、墙钟时间、token、观察路径、声明预期、警告和违规写入 `.evaluation.json`，并对测试失败、缺少预期工具或 Skill、禁用工具调用返回状态 1；JSONL 格式错误返回状态 2。
+`scripts/evaluate_test_results.py` 不读取配置、不连接数据库，也不调用模型。它只接受 schema version 2 的批量测试 JSONL：每个模型请求含最多一份 token usage 快照，事件保留可读调用轨迹。脚本根据事件中的函数调用归集业务工具与 `skill` 参数，将耗时、墙钟时间、token、观察路径、声明预期、警告和违规写入 `.evaluation.json`，并输出同名 `.report.md` 以展示 Prompt、可见思考、工具调用、工具结果和回复。测试失败、缺少预期工具或 Skill、禁用工具调用返回状态 1；JSONL 格式错误返回状态 2。
 
 ## Team Query Lua 运行时
 

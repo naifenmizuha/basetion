@@ -47,20 +47,17 @@ def optional_name_list(record: dict[str, Any], field: str, line_number: int) -> 
     return value
 
 
-def usage_from_message(message: Any) -> tuple[int, int, int] | None:
-    if not isinstance(message, dict):
+def usage_from_request(request: dict[str, Any], line_number: int) -> tuple[int, int, int] | None:
+    usage = request.get("token_usage")
+    if usage is None:
         return None
-    meta = message.get("response_meta")
-    if not isinstance(meta, dict):
-        return None
-    usage = meta.get("token_usage")
     if not isinstance(usage, dict):
-        return None
+        raise EvaluationInputError(f"第 {line_number} 行的 model_requests.token_usage 必须是对象")
     values: list[int] = []
     for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
         value = usage.get(field, 0)
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            return None
+            raise EvaluationInputError(f"第 {line_number} 行的 model_requests.token_usage.{field} 必须是非负整数")
         values.append(value)
     prompt, completion, total = values
     if total == 0 and (prompt != 0 or completion != 0):
@@ -80,15 +77,11 @@ def token_usage(model_requests: Any, line_number: int) -> tuple[dict[str, int], 
     for request in model_requests:
         if not isinstance(request, dict):
             raise EvaluationInputError(f"第 {line_number} 行的 model_requests 包含非对象值")
-        output = request.get("output", [])
-        if not isinstance(output, list):
-            raise EvaluationInputError(f"第 {line_number} 行的 model_requests.output 必须是数组")
-        candidates = [usage_from_message(message) for message in output]
-        candidates = [candidate for candidate in candidates if candidate is not None]
-        if not candidates:
+        candidate = usage_from_request(request, line_number)
+        if candidate is None:
             missing += 1
             continue
-        prompt, completion, tokens = max(candidates, key=lambda candidate: candidate[2])
+        prompt, completion, tokens = candidate
         total["prompt_tokens"] += prompt
         total["completion_tokens"] += completion
         total["total_tokens"] += tokens
@@ -157,10 +150,15 @@ def metric_summary(values: list[int]) -> dict[str, int | None]:
 
 
 def evaluate_record(record: dict[str, Any], line_number: int) -> dict[str, Any]:
+    if record.get("schema_version") != 2:
+        raise EvaluationInputError(f"第 {line_number} 行的 schema_version 必须为 2")
     run_id = require_string(record, "run_id", line_number)
     run_name = require_string(record, "run_name", line_number)
     session_id = require_string(record, "session_id", line_number)
     status = require_string(record, "status", line_number)
+    session_index = record.get("session_index")
+    if isinstance(session_index, bool) or not isinstance(session_index, int) or session_index <= 0:
+        raise EvaluationInputError(f"第 {line_number} 行的 session_index 必须是正整数")
     turn_index = record.get("turn_index")
     if isinstance(turn_index, bool) or not isinstance(turn_index, int) or turn_index <= 0:
         raise EvaluationInputError(f"第 {line_number} 行的 turn_index 必须是正整数")
@@ -202,6 +200,7 @@ def evaluate_record(record: dict[str, Any], line_number: int) -> dict[str, Any]:
         "run_id": run_id,
         "run_name": run_name,
         "session_id": session_id,
+        "session_index": session_index,
         "turn_index": turn_index,
         "status": status,
         "started_at": record["started_at"],
@@ -247,7 +246,7 @@ def evaluate_file(input_path: Path) -> dict[str, Any]:
     for (run_id, run_name), run_turns in sorted(grouped.items()):
         runs.append(summarize_run(run_id, run_name, run_turns))
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "input": str(input_path),
         "summary": summarize_turns(turns),
         "runs": runs,
@@ -292,6 +291,13 @@ def default_output_path(input_path: Path) -> Path:
     return input_path.with_name(input_path.name + suffix)
 
 
+def default_report_path(input_path: Path) -> Path:
+    suffix = ".report.md"
+    if input_path.suffix:
+        return input_path.with_suffix(suffix)
+    return input_path.with_name(input_path.name + suffix)
+
+
 def write_report(path: Path, report: dict[str, Any]) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -300,7 +306,122 @@ def write_report(path: Path, report: dict[str, Any]) -> None:
         raise EvaluationInputError(f"写入评测报告 {path} 失败: {error}") from error
 
 
-def print_summary(report: dict[str, Any], output_path: Path) -> None:
+def markdown_code(value: Any, language: str = "") -> list[str]:
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2)
+    return [f"````{language}", text, "````"]
+
+
+def reasoning_text(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    extension = value.get("openai_extension")
+    if not isinstance(extension, dict) or not isinstance(extension.get("content"), list):
+        return ""
+    return "".join(item.get("text", "") for item in extension["content"] if isinstance(item, dict))
+
+
+def tool_result_text(value: Any) -> str:
+    if not isinstance(value, dict) or not isinstance(value.get("content"), list):
+        return json.dumps(value, ensure_ascii=False, indent=2)
+    parts: list[str] = []
+    for item in value["content"]:
+        text = item.get("text") if isinstance(item, dict) else None
+        if isinstance(text, dict) and isinstance(text.get("text"), str):
+            parts.append(text["text"])
+        else:
+            parts.append(json.dumps(item, ensure_ascii=False, indent=2))
+    return "\n".join(parts)
+
+
+def render_event_markdown(events: Any) -> list[str]:
+    lines: list[str] = []
+    if not isinstance(events, list):
+        return lines
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "action":
+            lines.extend(["#### 动作", *markdown_code(event.get("action"), "json"), ""])
+            continue
+        message = event.get("message")
+        blocks = message.get("content_blocks", []) if isinstance(message, dict) else []
+        if not isinstance(blocks, list):
+            continue
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            if isinstance(block.get("reasoning"), dict):
+                text = reasoning_text(block["reasoning"])
+                if text:
+                    lines.extend(["#### 思考", text, ""])
+            elif isinstance(block.get("assistant_gen_text"), dict):
+                text = block["assistant_gen_text"].get("text")
+                if isinstance(text, str) and text:
+                    lines.extend(["#### 回复", text, ""])
+            elif isinstance(block.get("function_tool_call"), dict):
+                call = block["function_tool_call"]
+                lines.append(f"#### 工具调用 `{call.get('name', 'unknown')}`")
+                lines.append(f"Call ID: `{call.get('call_id', '')}`")
+                arguments = call.get("arguments", "")
+                try:
+                    arguments = json.loads(arguments) if isinstance(arguments, str) else arguments
+                except json.JSONDecodeError:
+                    pass
+                lines.extend(["", *markdown_code(arguments, "json"), ""])
+            elif isinstance(block.get("function_tool_result"), dict):
+                result = block["function_tool_result"]
+                lines.append(f"#### 工具结果 `{result.get('name', 'unknown')}`")
+                lines.append(f"Call ID: `{result.get('call_id', '')}`")
+                lines.extend(["", *markdown_code(tool_result_text(result)), ""])
+    return lines
+
+
+def write_markdown_report(path: Path, input_path: Path, report: dict[str, Any]) -> None:
+    records: dict[tuple[str, str, int], dict[str, Any]] = {}
+    for line in input_path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            record = json.loads(line)
+            records[(record["run_id"], record["run_name"], record["turn_index"])] = record
+    summary = report["summary"]
+    usage = summary["token_usage"]
+    lines = [
+        "# Basetion 测试报告",
+        "",
+        f"- 输入：`{input_path}`",
+        f"- 轮次：{summary['total_turns']}（完成 {summary['completed_turns']}，失败 {summary['failed_turns']}）",
+        f"- 判定：违规 {summary['violating_turns']}，警告 {summary['warning_count']}",
+        f"- 耗时：wall {summary['wall_clock_ms']} ms，累计 {summary['duration_ms']['total']} ms",
+        f"- Token：prompt {usage['prompt_tokens']}，completion {usage['completion_tokens']}，total {usage['total_tokens']}，请求 {usage['model_requests']}",
+        "",
+    ]
+    turns = sorted(report["turns"], key=lambda turn: (turn["session_index"], turn["turn_index"]))
+    for turn in turns:
+        source = records[(turn["run_id"], turn["run_name"], turn["turn_index"])]
+        lines.extend([
+            f"## {turn['run_name']} · 第 {turn['turn_index']} 轮",
+            "",
+            f"- 状态：`{turn['status']}`；判定：`{turn['verdict']}`；耗时：{turn['duration_ms']} ms",
+            f"- Token：prompt {turn['token_usage']['prompt_tokens']}，completion {turn['token_usage']['completion_tokens']}，total {turn['token_usage']['total_tokens']}，请求 {turn['model_requests']}",
+            f"- 预期工具：{', '.join(turn['expect_tools']) or '无'}；预期 Skill：{', '.join(turn['expect_skills']) or '无'}；禁用工具：{', '.join(turn['forbid_tools']) or '无'}",
+            f"- 实际工具：{', '.join(turn['observed_tools']) or '无'}；实际 Skill：{', '.join(turn['observed_skills']) or '无'}",
+            f"- 警告：{', '.join(turn['warnings']) or '无'}；违规：{', '.join(turn['violations']) or '无'}",
+            "",
+            "### Prompt",
+            "",
+            *markdown_code(source.get("prompt", "")),
+            "",
+            "### 调用轨迹",
+            "",
+            *render_event_markdown(source.get("events")),
+        ])
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    except (OSError, KeyError, json.JSONDecodeError) as error:
+        raise EvaluationInputError(f"写入 Markdown 报告 {path} 失败: {error}") from error
+
+
+def print_summary(report: dict[str, Any], output_path: Path, markdown_path: Path) -> None:
     summary = report["summary"]
     duration = summary["duration_ms"]
     usage = summary["token_usage"]
@@ -312,21 +433,25 @@ def print_summary(report: dict[str, Any], output_path: Path) -> None:
         if turn["violations"]:
             print(f"违规: run={turn['run_name']} turn={turn['turn_index']} {', '.join(turn['violations'])}")
     print(f"报告: {output_path}")
+    print(f"可读报告: {markdown_path}")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("results", type=Path, help="批量测试产生的 JSONL 文件")
     parser.add_argument("--output", type=Path, help="评测 JSON 输出路径；默认与输入同名并使用 .evaluation.json 后缀")
+    parser.add_argument("--report-output", type=Path, help="Markdown 报告路径；默认与输入同名并使用 .report.md 后缀")
     args = parser.parse_args()
     try:
         report = evaluate_file(args.results)
         output_path = args.output or default_output_path(args.results)
+        markdown_path = args.report_output or default_report_path(args.results)
         write_report(output_path, report)
+        write_markdown_report(markdown_path, args.results, report)
     except EvaluationInputError as error:
         print(f"评测输入错误: {error}", file=sys.stderr)
         return 2
-    print_summary(report, output_path)
+    print_summary(report, output_path, markdown_path)
     return 1 if report["summary"]["violating_turns"] else 0
 
 

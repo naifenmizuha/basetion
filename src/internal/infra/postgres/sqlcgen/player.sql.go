@@ -161,6 +161,66 @@ func (q *Queries) GetPlayer(ctx context.Context, id string) (GetPlayerRow, error
 	return i, err
 }
 
+const getPlayersByTeamAndJerseys = `-- name: GetPlayersByTeamAndJerseys :many
+WITH requested AS (
+    SELECT
+        split_part(value, '/', 1)::uuid AS team_id,
+        split_part(value, '/', 2)::smallint AS jersey_number
+    FROM unnest($1::text[]) AS requested(value)
+)
+SELECT p.id::text AS id, p.team_id::text AS team_id, p.jersey_number, p.name, p.batting_flags, p.throwing_flags, p.position_flags, p.active, p.created_at, p.updated_at, p.deleted_at
+FROM requested r
+JOIN players p ON p.team_id = r.team_id AND p.jersey_number = r.jersey_number
+WHERE p.deleted_at IS NULL
+ORDER BY p.team_id, p.jersey_number
+`
+
+type GetPlayersByTeamAndJerseysRow struct {
+	ID            string
+	TeamID        string
+	JerseyNumber  int16
+	Name          string
+	BattingFlags  int16
+	ThrowingFlags int16
+	PositionFlags int16
+	Active        bool
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+	DeletedAt     pgtype.Timestamptz
+}
+
+func (q *Queries) GetPlayersByTeamAndJerseys(ctx context.Context, keys []string) ([]GetPlayersByTeamAndJerseysRow, error) {
+	rows, err := q.db.Query(ctx, getPlayersByTeamAndJerseys, keys)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetPlayersByTeamAndJerseysRow{}
+	for rows.Next() {
+		var i GetPlayersByTeamAndJerseysRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TeamID,
+			&i.JerseyNumber,
+			&i.Name,
+			&i.BattingFlags,
+			&i.ThrowingFlags,
+			&i.PositionFlags,
+			&i.Active,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPlayerViews = `-- name: ListPlayerViews :many
 SELECT p.name, t.name AS team_name, p.jersey_number, p.position_flags, p.active
 FROM players p JOIN teams t ON t.id=p.team_id
