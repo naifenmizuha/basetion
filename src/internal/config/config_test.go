@@ -15,6 +15,7 @@ api_key_env = "TEST_OPENAI_API_KEY"
 base_url = "https://file.invalid/v1"
 reasoning_effort = "medium"
 reasoning_summary = "concise"
+context_window_tokens = 65432
 
 [database.run]
 url = "postgres://file.invalid/basetion"
@@ -24,6 +25,12 @@ url = "postgres://file.invalid/basetion_dev"
 
 [session]
 dir = "/tmp/file-sessions"
+
+[user]
+name = "测试用户"
+
+[log]
+file = "/tmp/basetion.log"
 
 [agent]
 max_iterations = 7
@@ -90,10 +97,10 @@ func TestLoadFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadFile() error = %v", err)
 	}
-	if cfg.OpenAI.Model != "gpt-from-file" || cfg.OpenAI.APIKeyEnv != "TEST_OPENAI_API_KEY" || cfg.OpenAI.APIKey != "file-secret" || cfg.OpenAI.BaseURL != "https://file.invalid/v1" || cfg.OpenAI.ReasoningEffort != "medium" || cfg.OpenAI.ReasoningSummary != "concise" {
+	if cfg.OpenAI.Model != "gpt-from-file" || cfg.OpenAI.APIKeyEnv != "TEST_OPENAI_API_KEY" || cfg.OpenAI.APIKey != "file-secret" || cfg.OpenAI.BaseURL != "https://file.invalid/v1" || cfg.OpenAI.ReasoningEffort != "medium" || cfg.OpenAI.ReasoningSummary != "concise" || cfg.OpenAI.ContextWindowTokens != 65432 {
 		t.Fatalf("unexpected OpenAI config: %#v", cfg.OpenAI)
 	}
-	if cfg.Database.Run.URL != "postgres://file.invalid/basetion" || cfg.Database.Dev.URL != "postgres://file.invalid/basetion_dev" || cfg.Session.Dir != "/tmp/file-sessions" || cfg.Agent.MaxIterations != 7 || !cfg.Agent.UnsafeDebugData {
+	if cfg.Database.Run.URL != "postgres://file.invalid/basetion" || cfg.Database.Dev.URL != "postgres://file.invalid/basetion_dev" || cfg.Session.Dir != "/tmp/file-sessions" || cfg.Agent.MaxIterations != 7 || !cfg.Agent.UnsafeDebugData || cfg.User.Name != "测试用户" || cfg.Log.File != "/tmp/basetion.log" {
 		t.Fatalf("unexpected config: %#v", cfg)
 	}
 	if fields := cfg.DiagnosticFields(); fields["api_key"] != nil || strings.Contains(fmt.Sprint(fields), cfg.OpenAI.APIKey) {
@@ -119,7 +126,7 @@ url = "postgres://defaults.invalid/basetion_dev"
 	if err != nil {
 		t.Fatalf("loadFile() error = %v", err)
 	}
-	if cfg.Session.Dir != defaultSessionDir || cfg.Agent.MaxIterations != defaultMaxIterations || cfg.Agent.UnsafeDebugData || cfg.OpenAI.ReasoningEffort != "high" || cfg.OpenAI.ReasoningSummary != "detailed" {
+	if cfg.Session.Dir != defaultSessionDir || cfg.Agent.MaxIterations != defaultMaxIterations || cfg.Agent.UnsafeDebugData || cfg.OpenAI.ReasoningEffort != "high" || cfg.OpenAI.ReasoningSummary != "detailed" || cfg.OpenAI.ContextWindowTokens != defaultContextWindow || cfg.User.Name != defaultUserName || cfg.Log.File != defaultLogFile {
 		t.Fatalf("defaults not applied: %#v", cfg)
 	}
 }
@@ -248,6 +255,19 @@ url = ""
 	_, err := loadWithoutDotEnv(t, contents)
 	if err == nil || !strings.Contains(err.Error(), "openai.model") || !strings.Contains(err.Error(), "openai.api_key_env") || !strings.Contains(err.Error(), "database.run.url") || !strings.Contains(err.Error(), "database.dev.url") {
 		t.Fatalf("required values error = %v", err)
+	}
+}
+
+func TestLoadFileRejectsInvalidRuntimeMetadata(t *testing.T) {
+	clearConfigEnvironment(t)
+	t.Setenv("TEST_OPENAI_API_KEY", "file-secret")
+	contents := strings.Replace(validTOML, "context_window_tokens = 65432", "context_window_tokens = 0", 1)
+	contents = strings.Replace(contents, "name = \"测试用户\"", "name = \"   \"", 1)
+	contents = strings.Replace(contents, "file = \"/tmp/basetion.log\"", "file = \"   \"", 1)
+
+	_, err := loadWithoutDotEnv(t, contents)
+	if err == nil || !strings.Contains(err.Error(), "openai.context_window_tokens") || !strings.Contains(err.Error(), "user.name") || !strings.Contains(err.Error(), "log.file") {
+		t.Fatalf("runtime metadata validation error = %v", err)
 	}
 }
 

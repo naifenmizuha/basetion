@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"errors"
 	"log"
+	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/callbacks"
@@ -21,8 +22,9 @@ var defaultInstruction string
 // Runtime groups the concrete Eino types needed by the application. It does
 // not define a second agent runtime abstraction.
 type Runtime struct {
-	Runner   *adk.TypedRunner[*schema.AgenticMessage]
-	Callback callbacks.Handler
+	Runner    *adk.TypedRunner[*schema.AgenticMessage]
+	Callback  callbacks.Handler
+	Telemetry *TurnTelemetry
 }
 
 // NewRuntime constructs the typed Eino agent, runner, and lifecycle callback.
@@ -40,11 +42,12 @@ func NewRuntime(
 		return nil, err
 	}
 	cfg := appconfig.Get()
+	telemetry := NewTurnTelemetry(logger)
 	agent, err := adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{
 		Name:          "basetion",
 		Description:   "按需加载项目知识并使用球队查询与修改能力的 Basetion 助手",
 		Instruction:   defaultInstruction,
-		Model:         agenticModel,
+		Model:         newStatusModel(agenticModel, cfg.User.Name, cfg.OpenAI.ContextWindowTokens, time.Now),
 		MaxIterations: cfg.Agent.MaxIterations,
 		Handlers: []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{
 			skillMiddleware,
@@ -61,6 +64,7 @@ func NewRuntime(
 			Agent:           agent,
 			EnableStreaming: true,
 		}),
-		Callback: NewLifecycleCallback(logger, cfg.Agent.UnsafeDebugData),
+		Callback:  NewLifecycleCallback(logger, cfg.Agent.UnsafeDebugData),
+		Telemetry: telemetry,
 	}, nil
 }

@@ -220,14 +220,17 @@ func TestRuntimeUsesTeamQueryTool(t *testing.T) {
 		}, &schema.StreamingMeta{Index: 0}))},
 		{assistantMessage(schema.NewContentBlockChunk(&schema.AssistantGenText{Text: "结果是 13。"}, &schema.StreamingMeta{Index: 0}))},
 	}}
-	runtime, err := NewRuntime(context.Background(), model, []tool.BaseTool{teamQueryTool}, log.New(io.Discard, "", 0))
+	var logs bytes.Buffer
+	runtime, err := NewRuntime(context.Background(), model, []tool.BaseTool{teamQueryTool}, log.New(&logs, "", 0))
 	if err != nil {
 		t.Fatal(err)
 	}
-	messages, err := collectRunnerMessages(t, runtime.Runner.Query(context.Background(), "计算结果", adk.WithCallbacks(runtime.Callback)))
+	ctx := runtime.Telemetry.Start(context.Background(), "tool-loop")
+	messages, err := collectRunnerMessages(t, runtime.Runner.Query(ctx, "计算结果", adk.WithCallbacks(runtime.Callback)))
 	if err != nil {
 		t.Fatal(err)
 	}
+	runtime.Telemetry.Finish(ctx, nil)
 	var sawSkillResult, sawTeamQueryResult bool
 	for _, message := range messages {
 		for _, block := range message.ContentBlocks {
@@ -239,6 +242,9 @@ func TestRuntimeUsesTeamQueryTool(t *testing.T) {
 	}
 	if !sawSkillResult || !sawTeamQueryResult {
 		t.Fatalf("expected Skill and team query results, skill=%v query=%v messages=%#v", sawSkillResult, sawTeamQueryResult, messages)
+	}
+	if !strings.Contains(logs.String(), "tool_calls=2") {
+		t.Fatalf("tool loop summary did not count both calls: %s", logs.String())
 	}
 }
 

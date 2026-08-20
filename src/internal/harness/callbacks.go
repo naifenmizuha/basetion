@@ -56,6 +56,9 @@ func NewLifecycleCallback(logger *log.Logger, unsafeDebugData bool) callbacks.Ha
 		}).
 		Tool(&callbacktemplate.ToolCallbackHandler{
 			OnStart: func(ctx context.Context, info *callbacks.RunInfo, input *tool.CallbackInput) context.Context {
+				if metrics := metricsFromContext(ctx); metrics != nil {
+					metrics.recordToolCall()
+				}
 				logger.Printf("component=tool event=start name=%q", info.Name)
 				if unsafeDebugData && input != nil {
 					logger.Printf("component=tool event=input name=%q payload=%s", info.Name, input.ArgumentsInJSON)

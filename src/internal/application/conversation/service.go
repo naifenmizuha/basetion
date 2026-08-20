@@ -14,15 +14,23 @@ import (
 
 // Service executes one durable business-conversation turn through Eino.
 type Service struct {
-	runner   *adk.TypedRunner[*schema.AgenticMessage]
-	store    SessionStore
-	locker   *SessionLocker
-	callback callbacks.Handler
-	now      func() time.Time
+	runner    *adk.TypedRunner[*schema.AgenticMessage]
+	store     SessionStore
+	locker    *SessionLocker
+	callback  callbacks.Handler
+	telemetry TurnTelemetry
+	now       func() time.Time
+}
+
+// TurnTelemetry brackets a valid conversation turn with runtime observability
+// state. Implementations must not retain or modify conversation messages.
+type TurnTelemetry interface {
+	Start(context.Context, string) context.Context
+	Finish(context.Context, error)
 }
 
 // NewService creates the conversation application service.
-func NewService(runner *adk.TypedRunner[*schema.AgenticMessage], store SessionStore, locker *SessionLocker, callback callbacks.Handler) (*Service, error) {
+func NewService(runner *adk.TypedRunner[*schema.AgenticMessage], store SessionStore, locker *SessionLocker, callback callbacks.Handler, telemetry ...TurnTelemetry) (*Service, error) {
 	if runner == nil {
 		return nil, errors.New("runner is required")
 	}
@@ -32,7 +40,11 @@ func NewService(runner *adk.TypedRunner[*schema.AgenticMessage], store SessionSt
 	if locker == nil {
 		locker = NewSessionLocker()
 	}
-	return &Service{runner: runner, store: store, locker: locker, callback: callback, now: time.Now}, nil
+	var turnTelemetry TurnTelemetry
+	if len(telemetry) > 0 {
+		turnTelemetry = telemetry[0]
+	}
+	return &Service{runner: runner, store: store, locker: locker, callback: callback, telemetry: turnTelemetry, now: time.Now}, nil
 }
 
 // Run validates and asynchronously executes a turn. The returned events retain
@@ -55,12 +67,23 @@ func (s *Service) execute(ctx context.Context, gen *adk.AsyncGenerator[*adk.Type
 	defer gen.Close()
 	unlock := s.locker.Lock(sessionID)
 	defer unlock()
+	runContext := ctx
+	if s.telemetry != nil {
+		runContext = s.telemetry.Start(ctx, sessionID)
+	}
+	var outcome error
+	defer func() {
+		if s.telemetry != nil {
+			s.telemetry.Finish(runContext, outcome)
+		}
+	}()
 
-	session, err := s.store.Load(ctx, sessionID)
+	session, err := s.store.Load(runContext, sessionID)
 	if errors.Is(err, ErrSessionNotFound) {
 		session = NewSession(sessionID, s.now())
 	} else if err != nil {
-		gen.Send(errorEvent(fmt.Errorf("load session: %w", err)))
+		outcome = fmt.Errorf("load session: %w", err)
+		gen.Send(errorEvent(outcome))
 		return
 	}
 
@@ -70,7 +93,7 @@ func (s *Service) execute(ctx context.Context, gen *adk.AsyncGenerator[*adk.Type
 	if s.callback != nil {
 		options = append(options, adk.WithCallbacks(s.callback))
 	}
-	run := s.runner.Run(ctx, input, options...)
+	run := s.runner.Run(runContext, input, options...)
 	generated := make([]*schema.AgenticMessage, 0)
 	for {
 		event, ok := run.Next()
@@ -83,25 +106,29 @@ func (s *Service) execute(ctx context.Context, gen *adk.AsyncGenerator[*adk.Type
 		forwarded, collected, collectErr := splitEvent(event)
 		gen.Send(forwarded)
 		if event.Err != nil {
+			outcome = event.Err
 			return
 		}
 		if collectErr != nil {
-			gen.Send(errorEvent(fmt.Errorf("collect agent output: %w", collectErr)))
+			outcome = fmt.Errorf("collect agent output: %w", collectErr)
+			gen.Send(errorEvent(outcome))
 			return
 		}
 		if collected != nil {
 			generated = append(generated, collected)
 		}
 	}
-	if err := ctx.Err(); err != nil {
-		gen.Send(errorEvent(err))
+	if err := runContext.Err(); err != nil {
+		outcome = err
+		gen.Send(errorEvent(outcome))
 		return
 	}
 
 	session.Messages = append(input, generated...)
 	session.UpdatedAt = s.now().UTC()
-	if err := s.store.Save(ctx, session); err != nil {
-		gen.Send(errorEvent(fmt.Errorf("save session: %w", err)))
+	if err := s.store.Save(runContext, session); err != nil {
+		outcome = fmt.Errorf("save session: %w", err)
+		gen.Send(errorEvent(outcome))
 	}
 }
 

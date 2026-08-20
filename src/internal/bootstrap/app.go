@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
@@ -40,7 +42,13 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 		return 2
 	}
 	cfg := config.Get()
-	logger := log.New(stderr, "basetion ", log.LstdFlags)
+	logFile, err := openLogFile(cfg.Log.File)
+	if err != nil {
+		fmt.Fprintf(stderr, "初始化运行日志失败: %v\n", err)
+		return 2
+	}
+	defer logFile.Close()
+	logger := log.New(logFile, "basetion ", log.LstdFlags)
 	diagnosticFields := cfg.DiagnosticFields()
 	diagnosticFields["profile"] = profile
 	logger.Printf("启动配置: %v", diagnosticFields)
@@ -140,10 +148,22 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 		fmt.Fprintf(stderr, "初始化 Agent Harness 失败: %v\n", err)
 		return 1
 	}
-	conversationService, err := conversation.NewService(runtime.Runner, store, conversation.NewSessionLocker(), runtime.Callback)
+	conversationService, err := conversation.NewService(runtime.Runner, store, conversation.NewSessionLocker(), runtime.Callback, runtime.Telemetry)
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化会话服务失败: %v\n", err)
 		return 1
 	}
 	return cli.Execute(ctx, args, conversationService, stdout, stderr)
+}
+
+func openLogFile(path string) (*os.File, error) {
+	directory := filepath.Dir(path)
+	if err := os.MkdirAll(directory, 0o750); err != nil {
+		return nil, fmt.Errorf("create log directory %q: %w", directory, err)
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
+	if err != nil {
+		return nil, fmt.Errorf("open log file %q: %w", path, err)
+	}
+	return file, nil
 }

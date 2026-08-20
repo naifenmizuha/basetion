@@ -4,6 +4,7 @@ api_key_env = "OPENAI_API_KEY"
 base_url = "https://api.openai.com/v1"
 reasoning_effort = "high"
 reasoning_summary = "detailed"
+context_window_tokens = 128000
 
 [database.run]
 url = "postgres://basetion:basetion@localhost:5432/basetion?sslmode=disable&connect_timeout=5"
@@ -13,6 +14,12 @@ url = "postgres://basetion:basetion@localhost:5432/basetion_dev?sslmode=disable&
 
 [session]
 dir = ".basetion/sessions"
+
+[user]
+name = "Basetion 用户"
+
+[log]
+file = ".basetion/basetion.log"
 
 [agent]
 max_iterations = 20

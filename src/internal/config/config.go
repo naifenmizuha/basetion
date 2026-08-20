@@ -15,6 +15,9 @@ const (
 	defaultConfigFile    = "config/config.toml"
 	defaultEnvFile       = ".env"
 	defaultSessionDir    = ".basetion/sessions"
+	defaultLogFile       = ".basetion/basetion.log"
+	defaultUserName      = "Basetion 用户"
+	defaultContextWindow = 128000
 	defaultMaxIterations = 20
 )
 
@@ -27,6 +30,8 @@ type Config struct {
 	Database DatabaseConfig `mapstructure:"database"`
 	Session  SessionConfig  `mapstructure:"session"`
 	Agent    AgentConfig    `mapstructure:"agent"`
+	User     UserConfig     `mapstructure:"user"`
+	Log      LogConfig      `mapstructure:"log"`
 }
 
 type DatabaseConfig struct {
@@ -39,16 +44,25 @@ type DatabaseProfileConfig struct {
 }
 
 type OpenAIConfig struct {
-	Model            string `mapstructure:"model"`
-	APIKeyEnv        string `mapstructure:"api_key_env"`
-	APIKey           string `mapstructure:"-"`
-	BaseURL          string `mapstructure:"base_url"`
-	ReasoningEffort  string `mapstructure:"reasoning_effort"`
-	ReasoningSummary string `mapstructure:"reasoning_summary"`
+	Model               string `mapstructure:"model"`
+	APIKeyEnv           string `mapstructure:"api_key_env"`
+	APIKey              string `mapstructure:"-"`
+	BaseURL             string `mapstructure:"base_url"`
+	ReasoningEffort     string `mapstructure:"reasoning_effort"`
+	ReasoningSummary    string `mapstructure:"reasoning_summary"`
+	ContextWindowTokens int    `mapstructure:"context_window_tokens"`
 }
 
 type SessionConfig struct {
 	Dir string `mapstructure:"dir"`
+}
+
+type UserConfig struct {
+	Name string `mapstructure:"name"`
+}
+
+type LogConfig struct {
+	File string `mapstructure:"file"`
 }
 
 type AgentConfig struct {
@@ -151,7 +165,10 @@ func decodeConfigFile(path string) (Config, error) {
 	v.SetConfigType("toml")
 	v.SetDefault("openai.reasoning_effort", "high")
 	v.SetDefault("openai.reasoning_summary", "detailed")
+	v.SetDefault("openai.context_window_tokens", defaultContextWindow)
 	v.SetDefault("session.dir", defaultSessionDir)
+	v.SetDefault("user.name", defaultUserName)
+	v.SetDefault("log.file", defaultLogFile)
 	v.SetDefault("agent.max_iterations", defaultMaxIterations)
 	v.SetDefault("agent.unsafe_debug_data", false)
 	if err := v.ReadInConfig(); err != nil {
@@ -167,6 +184,8 @@ func decodeConfigFile(path string) (Config, error) {
 	cfg.OpenAI.ReasoningEffort = strings.TrimSpace(cfg.OpenAI.ReasoningEffort)
 	cfg.OpenAI.ReasoningSummary = strings.TrimSpace(cfg.OpenAI.ReasoningSummary)
 	cfg.Session.Dir = strings.TrimSpace(cfg.Session.Dir)
+	cfg.User.Name = strings.TrimSpace(cfg.User.Name)
+	cfg.Log.File = strings.TrimSpace(cfg.Log.File)
 	cfg.Database.Run.trim()
 	cfg.Database.Dev.trim()
 	return cfg, nil
@@ -209,11 +228,20 @@ func (c Config) Validate() error {
 	if c.OpenAI.ReasoningSummary == "" {
 		problems = append(problems, errors.New("openai.reasoning_summary must not be empty"))
 	}
+	if c.OpenAI.ContextWindowTokens <= 0 {
+		problems = append(problems, errors.New("openai.context_window_tokens must be positive"))
+	}
 	if err := c.Database.Validate(); err != nil {
 		problems = append(problems, err)
 	}
 	if c.Session.Dir == "" {
 		problems = append(problems, errors.New("session.dir must not be empty"))
+	}
+	if c.User.Name == "" {
+		problems = append(problems, errors.New("user.name must not be empty"))
+	}
+	if c.Log.File == "" {
+		problems = append(problems, errors.New("log.file must not be empty"))
 	}
 	if c.Agent.MaxIterations <= 0 {
 		problems = append(problems, errors.New("agent.max_iterations must be positive"))
@@ -240,14 +268,17 @@ func (c DatabaseConfig) Validate() error {
 // intentionally omitted, and unsafe payload logging remains explicit.
 func (c Config) DiagnosticFields() map[string]any {
 	return map[string]any{
-		"model":             c.OpenAI.Model,
-		"base_url_set":      c.OpenAI.BaseURL != "",
-		"reasoning_effort":  c.OpenAI.ReasoningEffort,
-		"reasoning_summary": c.OpenAI.ReasoningSummary,
-		"database_run_set":  c.Database.Run.URL != "",
-		"database_dev_set":  c.Database.Dev.URL != "",
-		"session_dir":       c.Session.Dir,
-		"max_iterations":    c.Agent.MaxIterations,
-		"unsafe_debug_data": c.Agent.UnsafeDebugData,
+		"model":                 c.OpenAI.Model,
+		"base_url_set":          c.OpenAI.BaseURL != "",
+		"reasoning_effort":      c.OpenAI.ReasoningEffort,
+		"reasoning_summary":     c.OpenAI.ReasoningSummary,
+		"database_run_set":      c.Database.Run.URL != "",
+		"database_dev_set":      c.Database.Dev.URL != "",
+		"session_dir":           c.Session.Dir,
+		"user_name":             c.User.Name,
+		"log_file":              c.Log.File,
+		"context_window_tokens": c.OpenAI.ContextWindowTokens,
+		"max_iterations":        c.Agent.MaxIterations,
+		"unsafe_debug_data":     c.Agent.UnsafeDebugData,
 	}
 }

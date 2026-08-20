@@ -9,7 +9,9 @@
 
 `NewAgenticModel` 从已初始化的全局配置快照读取模型名、API Key、可选 Base URL、reasoning effort 和 reasoning summary，创建 Eino OpenAI Responses `AgenticModel`。
 
-`NewRuntime` 从同一配置快照读取最大迭代次数和调试开关，构造一个 `TypedChatModelAgent[*schema.AgenticMessage]`，注册工具、嵌入式系统指令和 Skill Middleware，再包装为启用流式输出的 `TypedRunner`。两个构造函数均不接收配置参数，要求 Bootstrap 先完成配置初始化。Harness 直接组合 Eino 的具体类型，不额外定义第二套运行时抽象。
+`NewRuntime` 从同一配置快照读取最大迭代次数、调试开关、状态栏用户和上下文窗口，构造一个 `TypedChatModelAgent[*schema.AgenticMessage]`，注册工具、嵌入式系统指令和 Skill Middleware，再包装为启用流式输出的 `TypedRunner`。两个构造函数均不接收配置参数，要求 Bootstrap 先完成配置初始化。Harness 直接组合 Eino 的具体类型，不额外定义第二套运行时抽象。
+
+模型实例在 Runtime 中由状态栏装饰器包裹。每次 `Generate` 或 `Stream` 都复制本次输入，并在末尾追加一条 system 消息，内容包括 `user.name`、RFC3339 当前时间、同一业务轮次上一模型请求返回的精确 input token 与 `openai.context_window_tokens`。首次请求的已用上下文为“未知”。装饰器不改写调用方输入；状态栏只存在于本次模型请求，Session 不会持久化它。
 
 系统指令通过 `go:embed` 从 `prompts/system.md` 编译进二进制，只保留身份、按需加载 Skill、禁止编造、事实与推断区分、默认语言和不输出私有推理等全局不变量。加载 Skill 的调用必须独立完成并等待结果，模型不得在同一响应中提前调用该 Skill 管理的业务工具。
 
@@ -25,5 +27,7 @@ Skill 中间件动态提供模型可见的 `skill` 工具；业务工具列表�
 ## 生命周期回调
 
 Runtime 同时提供 Agent、AgenticModel 和 Tool 生命周期回调。默认日志只记录组件、事件、名称以及消息或工具数量等元数据。
+
+`TurnTelemetry` 由会话服务为每个有效轮次创建并放入 Context。状态栏装饰器按模型请求保存最后一次 token usage，Tool 回调在工具开始时计数。轮次结束后，Telemetry 向 Runtime logger 写入 session ID、`completed`、`failed` 或 `cancelled` 状态、模型请求数、prompt/completion/total token 总数和工具调用数；失败与取消保留结束前已采集的指标。
 
 仅当 `agent.unsafe_debug_data=true`（或由 `BASETION_UNSAFE_DEBUG_DATA=true` 覆盖）时，回调才记录模型输入输出和工具完整载荷。logger 为空时使用丢弃输出的 logger，避免 nil 引用。
