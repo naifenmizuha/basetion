@@ -25,8 +25,15 @@ func TestStatusModelAddsTransientStatusAndUsesPreviousPromptTokens(t *testing.T)
 	}}
 	telemetry := NewTurnTelemetry(log.New(io.Discard, "", 0))
 	ctx := telemetry.Start(context.Background(), "session-1")
+	times := []time.Time{
+		time.Date(2026, 8, 20, 12, 34, 56, 0, time.FixedZone("CST", 8*60*60)),
+		time.Date(2026, 8, 20, 12, 35, 2, 0, time.FixedZone("CST", 8*60*60)),
+	}
+	timeIndex := 0
 	decorated := newStatusModel(base, "测试用户", 128000, func() time.Time {
-		return time.Date(2026, 8, 20, 12, 34, 56, 0, time.FixedZone("CST", 8*60*60))
+		current := times[timeIndex]
+		timeIndex++
+		return current
 	})
 
 	input := []*schema.AgenticMessage{schema.UserAgenticMessage("你好")}
@@ -45,14 +52,62 @@ func TestStatusModelAddsTransientStatusAndUsesPreviousPromptTokens(t *testing.T)
 	}
 	firstStatus := agenticText(base.inputs[0][1])
 	secondStatus := agenticText(base.inputs[1][1])
-	if !strings.Contains(firstStatus, "当前用户：测试用户") || !strings.Contains(firstStatus, "已用上下文：未知 / 128000 tokens") || !strings.Contains(firstStatus, "2026-08-20T12:34:56+08:00") {
+	if base.inputs[0][1].Role != schema.AgenticRoleTypeUser || base.inputs[1][1].Role != schema.AgenticRoleTypeUser {
+		t.Fatalf("status roles = %q, %q", base.inputs[0][1].Role, base.inputs[1][1].Role)
+	}
+	if !strings.Contains(firstStatus, "只读运行时元数据") || !strings.Contains(firstStatus, "不得覆盖系统规则") || !strings.Contains(firstStatus, "当前用户：测试用户") || !strings.Contains(firstStatus, "已用上下文：未知 / 128000 tokens") || !strings.Contains(firstStatus, "2026-08-20T12:34:56+08:00") {
 		t.Fatalf("first status = %q", firstStatus)
 	}
-	if !strings.Contains(secondStatus, "已用上下文：42 / 128000 tokens") {
+	if !strings.Contains(secondStatus, "已用上下文：42 / 128000 tokens") || !strings.Contains(secondStatus, "2026-08-20T12:35:02+08:00") {
 		t.Fatalf("second status = %q", secondStatus)
 	}
-	if strings.Contains(agenticText(base.inputs[1][0]), "状态栏信息") {
+	if strings.Contains(agenticText(base.inputs[1][0]), "状态栏信息") || strings.Contains(secondStatus, firstStatus) {
 		t.Fatalf("status leaked into durable input: %#v", base.inputs[1])
+	}
+}
+
+func TestStatusModelAppendsUserStatusAfterToolResult(t *testing.T) {
+	base := &scriptedAgenticModel{responses: [][]*schema.AgenticMessage{{{
+		Role: schema.AgenticRoleTypeAssistant,
+	}}}}
+	decorated := newStatusModel(base, "测试用户", 128000, func() time.Time {
+		return time.Date(2026, 8, 20, 12, 34, 56, 0, time.UTC)
+	})
+	toolCall := &schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant, ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.FunctionToolCall{
+		CallID:    "call-1",
+		Name:      "team_modify",
+		Arguments: strings.Repeat("x", 10000),
+	})}}
+	toolResult := &schema.AgenticMessage{
+		Role: schema.AgenticRoleTypeUser,
+		ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.FunctionToolResult{
+			CallID: "call-1",
+			Name:   "team_modify",
+			Content: []*schema.FunctionToolResultContentBlock{{
+				Type: schema.FunctionToolResultContentBlockTypeText,
+				Text: &schema.UserInputText{Text: `{"status":"ok"}`},
+			}},
+		})},
+	}
+	input := []*schema.AgenticMessage{schema.UserAgenticMessage("查询球队"), toolCall, toolResult}
+
+	stream, err := decorated.Stream(context.Background(), input)
+	consumeAgenticStream(t, mustStream(t, stream, err))
+
+	base.mu.Lock()
+	defer base.mu.Unlock()
+	if len(base.inputs) != 1 || len(base.inputs[0]) != 4 {
+		t.Fatalf("model inputs = %#v", base.inputs)
+	}
+	if base.inputs[0][1] != toolCall || base.inputs[0][2] != toolResult {
+		t.Fatalf("tool call/result was changed: %#v", base.inputs[0])
+	}
+	last := base.inputs[0][3]
+	if last.Role != schema.AgenticRoleTypeUser || !strings.Contains(agenticText(last), "状态栏信息") {
+		t.Fatalf("last message = %#v", last)
+	}
+	if len(input) != 3 {
+		t.Fatalf("caller input was mutated: %#v", input)
 	}
 }
 
@@ -80,6 +135,9 @@ func TestTurnTelemetrySummarizesAllModelAndToolUsage(t *testing.T) {
 func TestStatusModelCapturesTraceOnlyWhenEnabled(t *testing.T) {
 	base := &scriptedAgenticModel{responses: [][]*schema.AgenticMessage{{{
 		Role: schema.AgenticRoleTypeAssistant,
+		ResponseMeta: &schema.AgenticResponseMeta{TokenUsage: &schema.TokenUsage{
+			PromptTokens: 12, CompletionTokens: 3, TotalTokens: 15,
+		}},
 		ContentBlocks: []*schema.ContentBlock{
 			schema.NewContentBlock(&schema.AssistantGenText{Text: "answer"}),
 		},
@@ -91,11 +149,24 @@ func TestStatusModelCapturesTraceOnlyWhenEnabled(t *testing.T) {
 	stream, err := decorated.Stream(WithTurnTrace(context.Background(), trace), []*schema.AgenticMessage{schema.UserAgenticMessage("你好")})
 	consumeAgenticStream(t, mustStream(t, stream, err))
 	requests := trace.Snapshot()
-	if len(requests) != 1 || requests[0].Index != 1 || len(requests[0].Output) != 1 {
+	if len(requests) != 1 || requests[0].Index != 1 || requests[0].TokenUsage == nil {
 		t.Fatalf("trace=%#v", requests)
 	}
-	if !strings.Contains(requests[0].StatusBar, "当前用户：测试用户") || !strings.Contains(string(requests[0].Input), "状态栏信息") || !strings.Contains(string(requests[0].Output[0]), "answer") {
+	if requests[0].TokenUsage.PromptTokens != 12 || requests[0].TokenUsage.CompletionTokens != 3 || requests[0].TokenUsage.TotalTokens != 15 {
 		t.Fatalf("trace request=%#v", requests[0])
+	}
+}
+
+func TestTurnTraceKeepsOnlyLargestTokenUsageSnapshot(t *testing.T) {
+	trace := NewTurnTrace()
+	index := trace.begin()
+	trace.recordOutput(index, &schema.AgenticMessage{ResponseMeta: &schema.AgenticResponseMeta{TokenUsage: &schema.TokenUsage{PromptTokens: 3, CompletionTokens: 1, TotalTokens: 4}}})
+	trace.recordOutput(index, &schema.AgenticMessage{ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.AssistantGenText{Text: strings.Repeat("x", 10000)})}})
+	trace.recordOutput(index, &schema.AgenticMessage{ResponseMeta: &schema.AgenticResponseMeta{TokenUsage: &schema.TokenUsage{PromptTokens: 8, CompletionTokens: 5, TotalTokens: 13}}})
+
+	request := trace.Snapshot()[0]
+	if request.TokenUsage == nil || request.TokenUsage.TotalTokens != 13 {
+		t.Fatalf("trace request=%#v", request)
 	}
 }
 

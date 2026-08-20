@@ -2,7 +2,6 @@ package harness
 
 import (
 	"context"
-	"encoding/json"
 	"sync"
 
 	"github.com/cloudwego/eino/schema"
@@ -13,11 +12,15 @@ type turnTraceContextKey struct{}
 // ModelRequestTrace is an immutable JSON-ready capture of one request made to
 // the underlying model during a conversation turn.
 type ModelRequestTrace struct {
-	Index     int               `json:"index"`
-	StatusBar string            `json:"status_bar"`
-	Input     json.RawMessage   `json:"input"`
-	Output    []json.RawMessage `json:"output"`
-	Error     string            `json:"error,omitempty"`
+	Index      int              `json:"index"`
+	TokenUsage *ModelTokenUsage `json:"token_usage,omitempty"`
+	Error      string           `json:"error,omitempty"`
+}
+
+type ModelTokenUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 // TurnTrace collects optional diagnostic data for one conversation turn. It
@@ -43,18 +46,13 @@ func traceFromContext(ctx context.Context) *TurnTrace {
 	return trace
 }
 
-func (t *TurnTrace) begin(status string, input []*schema.AgenticMessage) int {
+func (t *TurnTrace) begin() int {
 	if t == nil {
 		return -1
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.requests = append(t.requests, ModelRequestTrace{
-		Index:     len(t.requests) + 1,
-		StatusBar: status,
-		Input:     marshalTraceValue(input),
-		Output:    make([]json.RawMessage, 0),
-	})
+	t.requests = append(t.requests, ModelRequestTrace{Index: len(t.requests) + 1})
 	return len(t.requests) - 1
 }
 
@@ -67,7 +65,20 @@ func (t *TurnTrace) recordOutput(index int, message *schema.AgenticMessage) {
 	if index >= len(t.requests) {
 		return
 	}
-	t.requests[index].Output = append(t.requests[index].Output, marshalTraceValue(message))
+	if message.ResponseMeta == nil || message.ResponseMeta.TokenUsage == nil {
+		return
+	}
+	usage := message.ResponseMeta.TokenUsage
+	total := usage.TotalTokens
+	if total == 0 {
+		total = usage.PromptTokens + usage.CompletionTokens
+	}
+	current := t.requests[index].TokenUsage
+	if current == nil || total > current.TotalTokens {
+		t.requests[index].TokenUsage = &ModelTokenUsage{
+			PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens, TotalTokens: total,
+		}
+	}
 }
 
 func (t *TurnTrace) recordError(index int, err error) {
@@ -91,19 +102,10 @@ func (t *TurnTrace) Snapshot() []ModelRequestTrace {
 	result := make([]ModelRequestTrace, len(t.requests))
 	for index, request := range t.requests {
 		result[index] = request
-		result[index].Input = append(json.RawMessage(nil), request.Input...)
-		result[index].Output = make([]json.RawMessage, len(request.Output))
-		for outputIndex, output := range request.Output {
-			result[index].Output[outputIndex] = append(json.RawMessage(nil), output...)
+		if request.TokenUsage != nil {
+			usage := *request.TokenUsage
+			result[index].TokenUsage = &usage
 		}
 	}
 	return result
-}
-
-func marshalTraceValue(value any) json.RawMessage {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return json.RawMessage(`{"trace_encoding_error":true}`)
-	}
-	return data
 }

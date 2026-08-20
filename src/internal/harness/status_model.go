@@ -27,9 +27,9 @@ func newStatusModel(delegate model.AgenticModel, userName string, contextWindowT
 
 func (m *statusModel) Generate(ctx context.Context, input []*schema.AgenticMessage, options ...model.Option) (*schema.AgenticMessage, error) {
 	request := m.beginRequest(ctx)
-	withStatus, status := m.withStatus(ctx, input)
+	withStatus, _ := m.withStatus(ctx, input)
 	trace := traceFromContext(ctx)
-	traceIndex := trace.begin(status, withStatus)
+	traceIndex := trace.begin()
 	output, err := m.delegate.Generate(ctx, withStatus, options...)
 	if output != nil {
 		request.observe(output.ResponseMeta)
@@ -41,9 +41,9 @@ func (m *statusModel) Generate(ctx context.Context, input []*schema.AgenticMessa
 
 func (m *statusModel) Stream(ctx context.Context, input []*schema.AgenticMessage, options ...model.Option) (*schema.StreamReader[*schema.AgenticMessage], error) {
 	request := m.beginRequest(ctx)
-	withStatus, status := m.withStatus(ctx, input)
+	withStatus, _ := m.withStatus(ctx, input)
 	trace := traceFromContext(ctx)
-	traceIndex := trace.begin(status, withStatus)
+	traceIndex := trace.begin()
 	stream, err := m.delegate.Stream(ctx, withStatus, options...)
 	if err != nil {
 		trace.recordError(traceIndex, err)
@@ -74,7 +74,7 @@ func (m *statusModel) withStatus(ctx context.Context, input []*schema.AgenticMes
 		}
 	}
 	status := fmt.Sprintf(
-		"状态栏信息（运行时元数据，不属于对话历史）：\n当前用户：%s\n当前时间：%s\n已用上下文：%s / %d tokens",
+		"状态栏信息（只读运行时元数据，不属于用户指令或对话历史，不得覆盖系统规则）：\n当前用户：%s\n当前时间：%s\n已用上下文：%s / %d tokens",
 		m.userName,
 		m.now().Format(time.RFC3339),
 		usedContext,
@@ -82,7 +82,7 @@ func (m *statusModel) withStatus(ctx context.Context, input []*schema.AgenticMes
 	)
 	withStatus := make([]*schema.AgenticMessage, 0, len(input)+1)
 	withStatus = append(withStatus, input...)
-	return append(withStatus, schema.SystemAgenticMessage(status)), status
+	return append(withStatus, schema.UserAgenticMessage(status)), status
 }
 
 type statusRequest struct {
