@@ -57,10 +57,15 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 		return 1
 	}
 
-	store, err := infrasession.NewFileStore(cfg.Session.Dir)
-	if err != nil {
-		fmt.Fprintf(stderr, "初始化 Session 存储失败: %v\n", err)
-		return 1
+	var store conversation.SessionStore
+	if cli.IsTestInvocation(args) {
+		store = infrasession.NewMemoryStore()
+	} else {
+		store, err = infrasession.NewFileStore(cfg.Session.Dir)
+		if err != nil {
+			fmt.Fprintf(stderr, "初始化 Session 存储失败: %v\n", err)
+			return 1
+		}
 	}
 	databaseProfile := cfg.Database.Run
 	if profile == cli.ProfileDev {

@@ -10,6 +10,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/openai/openai-go/v3 v3.35.0
+	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/spf13/viper v1.20.1
 	github.com/subosito/gotenv v1.6.0
 	github.com/yuin/gopher-lua v1.1.2
@@ -63,7 +64,6 @@ require (
 	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/nikolalohinski/gonja v1.5.3 // indirect
-	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sagikazarmark/locafero v0.7.0 // indirect

@@ -16,7 +16,7 @@ import (
 	"golang.org/x/term"
 )
 
-const usage = "用法: basetion [--profile run|dev] [--session-id <ID>] <提示词>"
+const usage = "用法: basetion [--profile run|dev] [--session-id <ID>] <提示词>\n       basetion [--profile run|dev] test --input <cases.toml> [--output <results.jsonl>] [--max-concurrency 4]"
 
 const (
 	ProfileRun = "run"
@@ -56,6 +56,9 @@ type Conversation interface {
 
 // Execute parses one CLI invocation, runs a conversation turn, and returns a process exit code.
 func Execute(ctx context.Context, args []string, conversation Conversation, stdout, stderr io.Writer) int {
+	if IsTestInvocation(args) {
+		return ExecuteTest(ctx, args[1:], conversation, stdout, stderr)
+	}
 	if conversation == nil {
 		fmt.Fprintln(stderr, "启动失败: conversation service is required")
 		return 1
@@ -87,6 +90,12 @@ func Execute(ctx context.Context, args []string, conversation Conversation, stdo
 		return 1
 	}
 	return 0
+}
+
+// IsTestInvocation reports whether args select the batch-test command. The
+// bootstrap composition root uses it to choose an ephemeral SessionStore.
+func IsTestInvocation(args []string) bool {
+	return len(args) > 0 && args[0] == "test"
 }
 
 func generateSessionID() (string, error) {

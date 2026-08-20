@@ -31,3 +31,5 @@ Runtime 同时提供 Agent、AgenticModel 和 Tool 生命周期回调。默认�
 `TurnTelemetry` 由会话服务为每个有效轮次创建并放入 Context。状态栏装饰器按模型请求保存最后一次 token usage，Tool 回调在工具开始时计数。轮次结束后，Telemetry 向 Runtime logger 写入 session ID、`completed`、`failed` 或 `cancelled` 状态、模型请求数、prompt/completion/total token 总数和工具调用数；失败与取消保留结束前已采集的指标。
 
 仅当 `agent.unsafe_debug_data=true`（或由 `BASETION_UNSAFE_DEBUG_DATA=true` 覆盖）时，回调才记录模型输入输出和工具完整载荷。logger 为空时使用丢弃输出的 logger，避免 nil 引用。
+
+批量测试可通过 Context 显式附加 `TurnTrace`。状态栏装饰器会将每次实际送入模型的完整消息、临时状态栏、流式输出和模型调用错误写入该 Trace；普通运行未附加 Trace 时不会保留这些数据。Trace 由入口在轮次结束后写入测试 JSONL，不写入业务 Session、运行日志或 Telemetry 汇总。

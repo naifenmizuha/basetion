@@ -77,6 +77,28 @@ func TestTurnTelemetrySummarizesAllModelAndToolUsage(t *testing.T) {
 	}
 }
 
+func TestStatusModelCapturesTraceOnlyWhenEnabled(t *testing.T) {
+	base := &scriptedAgenticModel{responses: [][]*schema.AgenticMessage{{{
+		Role: schema.AgenticRoleTypeAssistant,
+		ContentBlocks: []*schema.ContentBlock{
+			schema.NewContentBlock(&schema.AssistantGenText{Text: "answer"}),
+		},
+	}}}}
+	decorated := newStatusModel(base, "测试用户", 128000, func() time.Time {
+		return time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	})
+	trace := NewTurnTrace()
+	stream, err := decorated.Stream(WithTurnTrace(context.Background(), trace), []*schema.AgenticMessage{schema.UserAgenticMessage("你好")})
+	consumeAgenticStream(t, mustStream(t, stream, err))
+	requests := trace.Snapshot()
+	if len(requests) != 1 || requests[0].Index != 1 || len(requests[0].Output) != 1 {
+		t.Fatalf("trace=%#v", requests)
+	}
+	if !strings.Contains(requests[0].StatusBar, "当前用户：测试用户") || !strings.Contains(string(requests[0].Input), "状态栏信息") || !strings.Contains(string(requests[0].Output[0]), "answer") {
+		t.Fatalf("trace request=%#v", requests[0])
+	}
+}
+
 func mustStream(t *testing.T, stream *schema.StreamReader[*schema.AgenticMessage], err error) *schema.StreamReader[*schema.AgenticMessage] {
 	t.Helper()
 	if err != nil {

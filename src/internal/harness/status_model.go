@@ -27,22 +27,32 @@ func newStatusModel(delegate model.AgenticModel, userName string, contextWindowT
 
 func (m *statusModel) Generate(ctx context.Context, input []*schema.AgenticMessage, options ...model.Option) (*schema.AgenticMessage, error) {
 	request := m.beginRequest(ctx)
-	output, err := m.delegate.Generate(ctx, m.withStatus(ctx, input), options...)
+	withStatus, status := m.withStatus(ctx, input)
+	trace := traceFromContext(ctx)
+	traceIndex := trace.begin(status, withStatus)
+	output, err := m.delegate.Generate(ctx, withStatus, options...)
 	if output != nil {
 		request.observe(output.ResponseMeta)
+		trace.recordOutput(traceIndex, output)
 	}
+	trace.recordError(traceIndex, err)
 	return output, err
 }
 
 func (m *statusModel) Stream(ctx context.Context, input []*schema.AgenticMessage, options ...model.Option) (*schema.StreamReader[*schema.AgenticMessage], error) {
 	request := m.beginRequest(ctx)
-	stream, err := m.delegate.Stream(ctx, m.withStatus(ctx, input), options...)
+	withStatus, status := m.withStatus(ctx, input)
+	trace := traceFromContext(ctx)
+	traceIndex := trace.begin(status, withStatus)
+	stream, err := m.delegate.Stream(ctx, withStatus, options...)
 	if err != nil {
+		trace.recordError(traceIndex, err)
 		return nil, err
 	}
 	return schema.StreamReaderWithConvert(stream, func(message *schema.AgenticMessage) (*schema.AgenticMessage, error) {
 		if message != nil {
 			request.observe(message.ResponseMeta)
+			trace.recordOutput(traceIndex, message)
 		}
 		return message, nil
 	}), nil
@@ -56,7 +66,7 @@ func (m *statusModel) beginRequest(ctx context.Context) statusRequest {
 	return statusRequest{metrics: metrics, number: metrics.beginModelRequest()}
 }
 
-func (m *statusModel) withStatus(ctx context.Context, input []*schema.AgenticMessage) []*schema.AgenticMessage {
+func (m *statusModel) withStatus(ctx context.Context, input []*schema.AgenticMessage) ([]*schema.AgenticMessage, string) {
 	usedContext := "未知"
 	if metrics := metricsFromContext(ctx); metrics != nil {
 		if tokens, known := metrics.previousPromptTokens(); known {
@@ -72,7 +82,7 @@ func (m *statusModel) withStatus(ctx context.Context, input []*schema.AgenticMes
 	)
 	withStatus := make([]*schema.AgenticMessage, 0, len(input)+1)
 	withStatus = append(withStatus, input...)
-	return append(withStatus, schema.SystemAgenticMessage(status))
+	return append(withStatus, schema.SystemAgenticMessage(status)), status
 }
 
 type statusRequest struct {

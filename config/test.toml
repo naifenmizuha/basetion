@@ -1,0 +1,11 @@
+# 通过 `just test config/test.toml` 运行。
+# 同名数组表会在同一个测试 Session 内按声明顺序执行。
+
+[[test.team-roster]]
+prompt = "查询数据库中所有球队的当前球员名单，并列出球员姓名、球衣号码、打击手、投球手和守备位置。"
+expect_tools = ["team_query"]
+expect_skills = ["manage-team"]
+forbid_tools = ["team_modify"]
+
+[[test.team-roster]]
+prompt = "曹魏队和蜀汉队的人员组成各有什么特点？"
