@@ -17,10 +17,8 @@ import (
 const TeamFetchToolName = "team_fetch"
 
 type teamFetchInput struct {
-	Mode      string         `json:"mode" jsonschema:"required,description=操作模式：describe 按需加载组合读取说明，fetch 执行预定义只读读取,enum=describe,enum=fetch"`
-	Topics    *[]string      `json:"topics,omitempty" jsonschema:"description=仅 describe 使用：要读取的精确 topic；省略时返回顶层目录"`
-	Operation *string        `json:"operation,omitempty" jsonschema:"description=仅 fetch 使用：通过 describe 获得的精确读取名称"`
-	Arguments map[string]any `json:"arguments,omitempty" jsonschema:"description=仅 fetch 使用：比赛筛选参数 participant_names、date_from、date_to、limit"`
+	Operation string         `json:"operation" jsonschema:"required,description=通过 team_describe 获得的精确读取名称"`
+	Arguments map[string]any `json:"arguments,omitempty" jsonschema:"description=比赛筛选参数 participant_names、date_from、date_to、limit"`
 }
 
 type teamFetchTopic struct {
@@ -34,49 +32,33 @@ type teamFetchTopic struct {
 }
 
 type teamFetchOutput struct {
-	Mode      string           `json:"mode"`
-	Topics    []teamFetchTopic `json:"topics,omitempty"`
-	Operation string           `json:"operation,omitempty"`
-	Result    any              `json:"result,omitempty"`
+	Operation string `json:"operation,omitempty"`
+	Result    any    `json:"result,omitempty"`
 }
 
-// NewTeamFetch exposes server-owned composite read models. It deliberately
-// does not accept a program: statistical and record semantics remain in the
-// game domain instead of being reimplemented by Lua.
+// NewTeamFetch exposes server-owned composite read models. Its discovery
+// protocol is provided by team_describe so this tool only executes reads.
 func NewTeamFetch(games *game.QueryService) (tool.InvokableTool, error) {
 	if games == nil {
 		return nil, errors.New("game query service is required")
 	}
 	return toolutils.InferTool(
 		TeamFetchToolName,
-		"读取预定义的比赛组合数据。先用 describe 获取摘要、完整记录、阵容或球员表现的参数说明；再用 fetch 一次取得结果。该工具不接受 Lua、SQL 或修改操作。需要自由组合球队、球员、比赛和原子 Play 时使用 team_query。",
+		"执行预定义的比赛组合读取。先通过 team_describe 获取摘要、完整记录、阵容或球员表现的参数说明；再用本工具取得结果。该工具不接受 Lua、SQL 或修改操作。需要自由组合球队、球员、比赛和原子 Play 时使用 team_query。",
 		func(ctx context.Context, input teamFetchInput) (teamFetchOutput, error) {
-			switch strings.TrimSpace(input.Mode) {
-			case "describe":
-				if input.Operation != nil || input.Arguments != nil {
-					return teamFetchOutput{}, errors.New("team_fetch describe only accepts topics")
-				}
-				return teamFetchOutput{Mode: "describe", Topics: describeFetchTopics(stringSlice(input.Topics))}, nil
-			case "fetch":
-				if input.Topics != nil {
-					return teamFetchOutput{}, errors.New("team_fetch fetch does not accept topics")
-				}
-				op := strings.TrimSpace(stringValue(input.Operation))
-				if !isFetchOperation(op) {
-					return teamFetchOutput{}, fmt.Errorf("unknown team fetch operation %q", op)
-				}
-				filter, err := fetchMatchFilter(input.Arguments)
-				if err != nil {
-					return teamFetchOutput{}, fmt.Errorf("validate team fetch arguments: %w", err)
-				}
-				result, err := fetchGame(ctx, games, op, filter)
-				if err != nil {
-					return teamFetchOutput{}, fmt.Errorf("fetch %s: %w", op, err)
-				}
-				return teamFetchOutput{Mode: "fetch", Operation: op, Result: result}, nil
-			default:
-				return teamFetchOutput{}, fmt.Errorf("team_fetch mode must be describe or fetch, got %q", input.Mode)
+			op := strings.TrimSpace(input.Operation)
+			if !isFetchOperation(op) {
+				return teamFetchOutput{}, fmt.Errorf("unknown team fetch operation %q", op)
 			}
+			filter, err := fetchMatchFilter(input.Arguments)
+			if err != nil {
+				return teamFetchOutput{}, fmt.Errorf("validate team fetch arguments: %w", err)
+			}
+			result, err := fetchGame(ctx, games, op, filter)
+			if err != nil {
+				return teamFetchOutput{}, fmt.Errorf("fetch %s: %w", op, err)
+			}
+			return teamFetchOutput{Operation: op, Result: result}, nil
 		},
 	)
 }

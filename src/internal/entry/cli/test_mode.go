@@ -106,7 +106,7 @@ func ExecuteTest(ctx context.Context, args []string, conversation Conversation, 
 	}
 	resolvedOutputPath := strings.TrimSpace(*outputPath)
 	if resolvedOutputPath == "" {
-		resolvedOutputPath = defaultTestOutputPath(*inputPath, runID)
+		resolvedOutputPath = defaultTestOutputPath(*inputPath, time.Now())
 	}
 	writer, err := newTestResultWriter(resolvedOutputPath)
 	if err != nil {
@@ -328,13 +328,13 @@ func newTestResultWriter(path string) (*testResultWriter, error) {
 	return &testResultWriter{file: file, writer: bufio.NewWriter(file)}, nil
 }
 
-func defaultTestOutputPath(inputPath, runID string) string {
+func defaultTestOutputPath(inputPath string, startedAt time.Time) string {
 	base := filepath.Base(strings.TrimSpace(inputPath))
 	name := strings.TrimSuffix(base, filepath.Ext(base))
 	if name == "" || name == "." {
 		name = "test"
 	}
-	return filepath.Join(".basetion", "test-results", name+"-"+runID+".jsonl")
+	return filepath.Join(".basetion", "test-results", name+"-"+startedAt.Format("060102150405"), "log.jsonl")
 }
 
 func (w *testResultWriter) Write(result testResult) error {

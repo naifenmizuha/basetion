@@ -136,7 +136,7 @@ func TestStatusModelCapturesTraceOnlyWhenEnabled(t *testing.T) {
 	base := &scriptedAgenticModel{responses: [][]*schema.AgenticMessage{{{
 		Role: schema.AgenticRoleTypeAssistant,
 		ResponseMeta: &schema.AgenticResponseMeta{TokenUsage: &schema.TokenUsage{
-			PromptTokens: 12, CompletionTokens: 3, TotalTokens: 15,
+			PromptTokens: 12, PromptTokenDetails: schema.PromptTokenDetails{CachedTokens: 8}, CompletionTokens: 3, TotalTokens: 15,
 		}},
 		ContentBlocks: []*schema.ContentBlock{
 			schema.NewContentBlock(&schema.AssistantGenText{Text: "answer"}),
@@ -152,7 +152,7 @@ func TestStatusModelCapturesTraceOnlyWhenEnabled(t *testing.T) {
 	if len(requests) != 1 || requests[0].Index != 1 || requests[0].TokenUsage == nil {
 		t.Fatalf("trace=%#v", requests)
 	}
-	if requests[0].TokenUsage.PromptTokens != 12 || requests[0].TokenUsage.CompletionTokens != 3 || requests[0].TokenUsage.TotalTokens != 15 {
+	if requests[0].TokenUsage.PromptTokens != 12 || requests[0].TokenUsage.CachedTokens != 8 || requests[0].TokenUsage.CompletionTokens != 3 || requests[0].TokenUsage.TotalTokens != 15 {
 		t.Fatalf("trace request=%#v", requests[0])
 	}
 }
@@ -160,12 +160,12 @@ func TestStatusModelCapturesTraceOnlyWhenEnabled(t *testing.T) {
 func TestTurnTraceKeepsOnlyLargestTokenUsageSnapshot(t *testing.T) {
 	trace := NewTurnTrace()
 	index := trace.begin()
-	trace.recordOutput(index, &schema.AgenticMessage{ResponseMeta: &schema.AgenticResponseMeta{TokenUsage: &schema.TokenUsage{PromptTokens: 3, CompletionTokens: 1, TotalTokens: 4}}})
+	trace.recordOutput(index, &schema.AgenticMessage{ResponseMeta: &schema.AgenticResponseMeta{TokenUsage: &schema.TokenUsage{PromptTokens: 3, PromptTokenDetails: schema.PromptTokenDetails{CachedTokens: 1}, CompletionTokens: 1, TotalTokens: 4}}})
 	trace.recordOutput(index, &schema.AgenticMessage{ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.AssistantGenText{Text: strings.Repeat("x", 10000)})}})
-	trace.recordOutput(index, &schema.AgenticMessage{ResponseMeta: &schema.AgenticResponseMeta{TokenUsage: &schema.TokenUsage{PromptTokens: 8, CompletionTokens: 5, TotalTokens: 13}}})
+	trace.recordOutput(index, &schema.AgenticMessage{ResponseMeta: &schema.AgenticResponseMeta{TokenUsage: &schema.TokenUsage{PromptTokens: 8, PromptTokenDetails: schema.PromptTokenDetails{CachedTokens: 5}, CompletionTokens: 5, TotalTokens: 13}}})
 
 	request := trace.Snapshot()[0]
-	if request.TokenUsage == nil || request.TokenUsage.TotalTokens != 13 {
+	if request.TokenUsage == nil || request.TokenUsage.TotalTokens != 13 || request.TokenUsage.CachedTokens != 5 {
 		t.Fatalf("trace request=%#v", request)
 	}
 }

@@ -12,7 +12,7 @@ src/cmd/basetion
     -> src/internal/entry/cli
       -> src/internal/application/conversation
         -> src/internal/harness
-          -> skills/{project-knowledge,manage-team}
+          -> skills/{project-knowledge,query-team-data,manage-roster,manage-game-setup,record-game,manage-training}
           -> src/internal/tools
             -> src/internal/domain/teamquery
               <- src/internal/infra/teamquery
@@ -38,5 +38,5 @@ src/cmd/basetion
 
 - 只有 CLI 入口，没有 HTTP 或机器人入口。
 - 会话使用本地 JSON 快照；Eino Checkpoint 尚未启用。
-- `team_fetch` 提供四类完整比赛投影；`team_query` 可组合球队、当前球员、比赛和原子 Play，且不会向模型暴露内部比赛 ID；训练尚未进入新的姓名化 Lua 协议。
-- `team_modify` 支持球队、球员、比赛、阵容和自训记录的预定义修改；球员没有转队能力。
+- `team_describe` 以 `fetch.*`、`query.*`、`modify.*` 目录公开协议；`team_fetch` 提供四类完整比赛投影，`team_query` 可组合球队、当前球员、比赛和原子 Play，且不会向模型暴露内部比赛 ID；训练尚未进入姓名化 Lua 协议。
+- `team_modify` 支持球队、球员、比赛、阵容和自训记录的预定义批量修改；球员没有转队能力。

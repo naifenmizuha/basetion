@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from evaluate_test_results import EvaluationInputError, evaluate_file, write_markdown_report
+from evaluate_test_results import EvaluationInputError, default_output_path, default_report_path, evaluate_file, write_markdown_report
 
 
 def record(**overrides: object) -> dict[str, object]:
@@ -40,7 +40,7 @@ def record(**overrides: object) -> dict[str, object]:
         "model_requests": [
             {
                 "index": 1,
-                "token_usage": {"prompt_tokens": 7, "completion_tokens": 4, "total_tokens": 11},
+                "token_usage": {"prompt_tokens": 7, "cached_tokens": 3, "completion_tokens": 4, "total_tokens": 11},
             },
             {"index": 2},
         ],
@@ -65,6 +65,7 @@ class EvaluateTestResultsTest(unittest.TestCase):
         self.assertEqual(2250, summary["duration_ms"]["total"])
         self.assertEqual(2250, summary["wall_clock_ms"])
         self.assertEqual(7, summary["token_usage"]["prompt_tokens"])
+        self.assertEqual(3, summary["token_usage"]["cached_tokens"])
         self.assertEqual(4, summary["token_usage"]["completion_tokens"])
         self.assertEqual(11, summary["token_usage"]["total_tokens"])
         self.assertEqual(2, summary["token_usage"]["model_requests"])
@@ -125,6 +126,11 @@ class EvaluateTestResultsTest(unittest.TestCase):
         markdown = output_path.read_text(encoding="utf-8")
         for expected in ("列出球队", "先查询", "team_query", "call-1", "teams", "共有两支球队。"):
             self.assertIn(expected, markdown)
+
+    def test_run_directory_uses_fixed_artifact_names(self) -> None:
+        log_path = Path(".basetion/test-results/game-input-260820192456/log.jsonl")
+        self.assertEqual(default_output_path(log_path), log_path.with_name("evaluation.json"))
+        self.assertEqual(default_report_path(log_path), log_path.with_name("report.md"))
 
 
 if __name__ == "__main__":

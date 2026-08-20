@@ -216,7 +216,7 @@ func TestRuntimeUsesTeamQueryTool(t *testing.T) {
 		{assistantMessage(schema.NewContentBlockChunk(&schema.FunctionToolCall{
 			CallID:    "team-query-call",
 			Name:      basetiontools.TeamQueryToolName,
-			Arguments: `{"mode":"query","program":"function main(data) return {total = 6 + 7} end"}`,
+			Arguments: `{"program":"function main(data) return {total = 6 + 7} end"}`,
 		}, &schema.StreamingMeta{Index: 0}))},
 		{assistantMessage(schema.NewContentBlockChunk(&schema.AssistantGenText{Text: "结果是 13。"}, &schema.StreamingMeta{Index: 0}))},
 	}}

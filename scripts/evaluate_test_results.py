@@ -47,24 +47,24 @@ def optional_name_list(record: dict[str, Any], field: str, line_number: int) -> 
     return value
 
 
-def usage_from_request(request: dict[str, Any], line_number: int) -> tuple[int, int, int] | None:
+def usage_from_request(request: dict[str, Any], line_number: int) -> tuple[int, int, int, int] | None:
     usage = request.get("token_usage")
     if usage is None:
         return None
     if not isinstance(usage, dict):
         raise EvaluationInputError(f"第 {line_number} 行的 model_requests.token_usage 必须是对象")
     values: list[int] = []
-    for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+    for field in ("prompt_tokens", "cached_tokens", "completion_tokens", "total_tokens"):
         value = usage.get(field, 0)
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise EvaluationInputError(f"第 {line_number} 行的 model_requests.token_usage.{field} 必须是非负整数")
         values.append(value)
-    prompt, completion, total = values
+    prompt, cached, completion, total = values
     if total == 0 and (prompt != 0 or completion != 0):
         total = prompt + completion
     if total == 0:
         return None
-    return prompt, completion, total
+    return prompt, cached, completion, total
 
 
 def token_usage(model_requests: Any, line_number: int) -> tuple[dict[str, int], int, int]:
@@ -72,7 +72,7 @@ def token_usage(model_requests: Any, line_number: int) -> tuple[dict[str, int], 
         model_requests = []
     if not isinstance(model_requests, list):
         raise EvaluationInputError(f"第 {line_number} 行的 model_requests 必须是数组")
-    total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    total = {"prompt_tokens": 0, "cached_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     missing = 0
     for request in model_requests:
         if not isinstance(request, dict):
@@ -81,8 +81,9 @@ def token_usage(model_requests: Any, line_number: int) -> tuple[dict[str, int], 
         if candidate is None:
             missing += 1
             continue
-        prompt, completion, tokens = candidate
+        prompt, cached, completion, tokens = candidate
         total["prompt_tokens"] += prompt
+        total["cached_tokens"] += cached
         total["completion_tokens"] += completion
         total["total_tokens"] += tokens
     return total, len(model_requests), missing
@@ -256,7 +257,7 @@ def evaluate_file(input_path: Path) -> dict[str, Any]:
 
 def summarize_turns(turns: list[dict[str, Any]]) -> dict[str, Any]:
     durations = [turn["duration_ms"] for turn in turns]
-    token_fields = ("prompt_tokens", "completion_tokens", "total_tokens")
+    token_fields = ("prompt_tokens", "cached_tokens", "completion_tokens", "total_tokens")
     return {
         "total_turns": len(turns),
         "completed_turns": sum(turn["status"] == "completed" for turn in turns),
@@ -285,6 +286,8 @@ def wall_clock_ms(turns: list[dict[str, Any]]) -> int:
 
 
 def default_output_path(input_path: Path) -> Path:
+    if input_path.name == "log.jsonl":
+        return input_path.with_name("evaluation.json")
     suffix = ".evaluation.json"
     if input_path.suffix:
         return input_path.with_suffix(suffix)
@@ -292,6 +295,8 @@ def default_output_path(input_path: Path) -> Path:
 
 
 def default_report_path(input_path: Path) -> Path:
+    if input_path.name == "log.jsonl":
+        return input_path.with_name("report.md")
     suffix = ".report.md"
     if input_path.suffix:
         return input_path.with_suffix(suffix)
@@ -391,7 +396,7 @@ def write_markdown_report(path: Path, input_path: Path, report: dict[str, Any]) 
         f"- 轮次：{summary['total_turns']}（完成 {summary['completed_turns']}，失败 {summary['failed_turns']}）",
         f"- 判定：违规 {summary['violating_turns']}，警告 {summary['warning_count']}",
         f"- 耗时：wall {summary['wall_clock_ms']} ms，累计 {summary['duration_ms']['total']} ms",
-        f"- Token：prompt {usage['prompt_tokens']}，completion {usage['completion_tokens']}，total {usage['total_tokens']}，请求 {usage['model_requests']}",
+        f"- Token：prompt {usage['prompt_tokens']}（cached {usage['cached_tokens']}），completion {usage['completion_tokens']}，total {usage['total_tokens']}，请求 {usage['model_requests']}",
         "",
     ]
     turns = sorted(report["turns"], key=lambda turn: (turn["session_index"], turn["turn_index"]))
@@ -401,7 +406,7 @@ def write_markdown_report(path: Path, input_path: Path, report: dict[str, Any]) 
             f"## {turn['run_name']} · 第 {turn['turn_index']} 轮",
             "",
             f"- 状态：`{turn['status']}`；判定：`{turn['verdict']}`；耗时：{turn['duration_ms']} ms",
-            f"- Token：prompt {turn['token_usage']['prompt_tokens']}，completion {turn['token_usage']['completion_tokens']}，total {turn['token_usage']['total_tokens']}，请求 {turn['model_requests']}",
+            f"- Token：prompt {turn['token_usage']['prompt_tokens']}（cached {turn['token_usage']['cached_tokens']}），completion {turn['token_usage']['completion_tokens']}，total {turn['token_usage']['total_tokens']}，请求 {turn['model_requests']}",
             f"- 预期工具：{', '.join(turn['expect_tools']) or '无'}；预期 Skill：{', '.join(turn['expect_skills']) or '无'}；禁用工具：{', '.join(turn['forbid_tools']) or '无'}",
             f"- 实际工具：{', '.join(turn['observed_tools']) or '无'}；实际 Skill：{', '.join(turn['observed_skills']) or '无'}",
             f"- 警告：{', '.join(turn['warnings']) or '无'}；违规：{', '.join(turn['violations']) or '无'}",
@@ -428,7 +433,7 @@ def print_summary(report: dict[str, Any], output_path: Path, markdown_path: Path
     print(f"评测输入: {report['input']}")
     print(f"轮次: {summary['total_turns']}，完成: {summary['completed_turns']}，违规: {summary['violating_turns']}，警告: {summary['warning_count']}")
     print(f"耗时(ms): sum={duration['total']} wall={summary['wall_clock_ms']} avg={duration['average']} p50={duration['p50']} p95={duration['p95']} max={duration['max']}")
-    print(f"Token: prompt={usage['prompt_tokens']} completion={usage['completion_tokens']} total={usage['total_tokens']} requests={usage['model_requests']} missing_usage={usage['requests_without_token_usage']}")
+    print(f"Token: prompt={usage['prompt_tokens']} cached={usage['cached_tokens']} completion={usage['completion_tokens']} total={usage['total_tokens']} requests={usage['model_requests']} missing_usage={usage['requests_without_token_usage']}")
     for turn in report["turns"]:
         if turn["violations"]:
             print(f"违规: run={turn['run_name']} turn={turn['turn_index']} {', '.join(turn['violations'])}")

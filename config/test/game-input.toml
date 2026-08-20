@@ -98,5 +98,5 @@ prompt = """
 
 张郃第二次打击：坏球；看球好球；坏球；界外球；打进场内，成为中外野牺牲飞球，被黄忠接杀，形成第二个出局。张辽从三垒得再见分，徐晃留在二垒；这是诸葛亮的自责分，张郃获得一分打点。曹魏队以 3:2 获胜，比赛立即结束。
 """
-expect_tools = ["team_modify"]
+expect_tools = ["team_describe", "team_modify"]
 expect_skills = ["record-game"]

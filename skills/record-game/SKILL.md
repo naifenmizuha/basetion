@@ -5,14 +5,14 @@ description: "录入一场已结束的棒球比赛，适用于用户同时提供
 
 # 录入完整比赛
 
-使用 `team_modify` 的 `game.create` 一次录入比赛、双方首发和全部 Play。球队与球员通过精确球队名和当前背号解析，不传内部 ID。
+使用 `team_describe` 读取 `modify.game.create` 说明，再通过 `team_modify` 一次录入比赛、双方首发和全部 Play。球队与球员通过精确球队名和当前背号解析，不传内部 ID。
 
 ## 工作流
 
-1. 首先调用 `team_modify.describe` 并仅请求 `game.create`。字段含义、枚举、`conventions` 与 `invariants` 是当前协议的权威来源。
+1. 首先调用 `team_describe`，载荷为 `{"topics":["modify.game.create"]}`。字段含义、枚举、`conventions` 与 `invariants` 是当前协议的权威来源。
 2. 将用户叙述整理为双方首发和连续的 Play。阵容条目只写背号；每个 Play 只填写事件事实：打者/投手背号、逐球结果、打席结果、跑垒和守备事实。球队、好坏球数、垒包、出局和比分由服务端推导。
 3. 向用户复述比赛安排、双方首发、Play 数量、最终比分及将写入的逐球、跑垒和守备范围，并取得完整确认。用户已明确确认“直接执行”时，可将该确认用于本次写入。
-4. 只调用一次 `team_modify.execute`：`operation="game.create"`、完整 `arguments`、`confirmed=true`。不要把一场比赛拆成多个修改。
+4. 只调用一次 `team_modify`：`{"confirmed":true,"operations":[{"key":"record-game","operation":"game.create","arguments":{...}}]}`。不要把一场比赛拆成多个修改。
 5. 成功后报告比赛和完成数量。返回 `partial` 时，依据 `completed_lineups`、`completed_plays`、`stopped_stage`、`stopped_play_index` 说明已保留内容；不要自动重试，先读取现状并由用户决定后续处理。
 
 ## Play 编码 few-shot

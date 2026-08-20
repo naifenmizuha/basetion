@@ -19,6 +19,7 @@ type ModelRequestTrace struct {
 
 type ModelTokenUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
+	CachedTokens     int `json:"cached_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
 }
@@ -76,8 +77,15 @@ func (t *TurnTrace) recordOutput(index int, message *schema.AgenticMessage) {
 	current := t.requests[index].TokenUsage
 	if current == nil || total > current.TotalTokens {
 		t.requests[index].TokenUsage = &ModelTokenUsage{
-			PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens, TotalTokens: total,
+			PromptTokens:     usage.PromptTokens,
+			CachedTokens:     usage.PromptTokenDetails.CachedTokens,
+			CompletionTokens: usage.CompletionTokens,
+			TotalTokens:      total,
 		}
+		return
+	}
+	if usage.PromptTokenDetails.CachedTokens > current.CachedTokens {
+		current.CachedTokens = usage.PromptTokenDetails.CachedTokens
 	}
 }
 

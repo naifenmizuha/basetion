@@ -2,6 +2,8 @@
 model = "gpt-5"
 api_key_env = "OPENAI_API_KEY"
 base_url = "https://api.openai.com/v1"
+custom_headers = {}
+disable_response_storage = false
 reasoning_effort = "high"
 reasoning_summary = "detailed"
 context_window_tokens = 128000

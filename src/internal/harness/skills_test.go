@@ -97,11 +97,11 @@ func TestRepositorySkillsContainRequiredGuidance(t *testing.T) {
 		}
 	}
 	checks := map[string][]string{
-		"query-team-data":   {"team_fetch", "team_query", "Few-shot", "main(data)", "game.plays", "最小 table"},
-		"manage-roster":     {"team.create", "player.change_jersey", "Few-shot", `"confirmed":true`, "stopped"},
-		"manage-game-setup": {"match.set_status", "lineup.create", "Few-shot", "record-game", "软删除"},
-		"record-game":       {"team_modify.describe", "game.create", "few-shot", "from_base=0", "牺牲飞球", "阳春本垒打"},
-		"manage-training":   {"training.create", "training.update", "Few-shot", `"confirmed":true`, "软删除"},
+		"query-team-data":   {"team_describe", "fetch.game.summaries", "query.player.list", "team_fetch", "team_query", "Few-shot", "main(data)", "game.plays", "最小 table"},
+		"manage-roster":     {"team_describe", "modify.team.create", "team_modify", "player.change_jersey", "Few-shot", `"operations"`, "stopped"},
+		"manage-game-setup": {"team_describe", "modify.match.set_status", "team_modify", "lineup.create", "Few-shot", "record-game", "operations", "软删除"},
+		"record-game":       {"team_describe", "modify.game.create", "team_modify", "few-shot", "operations", "from_base=0", "牺牲飞球", "阳春本垒打"},
+		"manage-training":   {"team_describe", "modify.training.create", "team_modify", "training.update", "Few-shot", `"operations"`, "软删除"},
 	}
 	for name, phrases := range checks {
 		skill, e := backend.Get(context.Background(), name)

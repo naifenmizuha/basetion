@@ -5,7 +5,7 @@ description: "查询 Basetion 中球队、球员和比赛事实，或分析比�
 
 # 查询球队数据
 
-使用 `team_fetch` 获取服务端已组合的比赛摘要、记录、阵容和表现；只有需要自由组合球队、球员、比赛和原子 Play 时才使用只读的 `team_query` Lua。先对所需叶子调用精确 `describe`，以本次返回的参数和字段为准。
+使用 `team_fetch` 获取服务端已组合的比赛摘要、记录、阵容和表现；只有需要自由组合球队、球员、比赛和原子 Play 时才使用只读的 `team_query` Lua。先通过 `team_describe` 对所需叶子调用精确的 `fetch.*` 或 `query.*` topic，以本次返回的参数和字段为准。
 
 ## 选择读取方式
 
@@ -19,15 +19,15 @@ description: "查询 Basetion 中球队、球员和比赛事实，或分析比�
 
 ### 读取球队本月比赛摘要
 
-先 describe `game.summaries` 后，直接使用服务端摘要：
+先 describe `fetch.game.summaries` 后，直接使用服务端摘要：
 
 ```json
-{"mode":"fetch","operation":"game.summaries","arguments":{"participant_names":["蜀汉队"],"date_from":"2026-08-01","date_to":"2026-08-31","limit":100}}
+{"operation":"game.summaries","arguments":{"participant_names":["蜀汉队"],"date_from":"2026-08-01","date_to":"2026-08-31","limit":100}}
 ```
 
 ### 按球队投影当前球员名单
 
-先 describe `player.list`，再在 Lua 中仅保留回答需要的业务字段：
+先 describe `query.player.list`，再在 Lua 中仅保留回答需要的业务字段：
 
 ```lua
 function main(data)
@@ -42,7 +42,7 @@ end
 
 ### 读取已筛选比赛的原子 Play
 
-先 describe `game.list` 和 `game.plays`。筛选与 Play 读取留在同一个程序中，再投影所需字段：
+先 describe `query.game.list` 和 `query.game.plays`。筛选与 Play 读取留在同一个程序中，再投影所需字段：
 
 ```lua
 function main(data)

@@ -13,6 +13,8 @@ const validTOML = `[openai]
 model = "gpt-from-file"
 api_key_env = "TEST_OPENAI_API_KEY"
 base_url = "https://file.invalid/v1"
+custom_headers = { "x-context-provider" = "Azure" }
+disable_response_storage = true
 reasoning_effort = "medium"
 reasoning_summary = "concise"
 context_window_tokens = 65432
@@ -97,13 +99,13 @@ func TestLoadFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadFile() error = %v", err)
 	}
-	if cfg.OpenAI.Model != "gpt-from-file" || cfg.OpenAI.APIKeyEnv != "TEST_OPENAI_API_KEY" || cfg.OpenAI.APIKey != "file-secret" || cfg.OpenAI.BaseURL != "https://file.invalid/v1" || cfg.OpenAI.ReasoningEffort != "medium" || cfg.OpenAI.ReasoningSummary != "concise" || cfg.OpenAI.ContextWindowTokens != 65432 {
+	if cfg.OpenAI.Model != "gpt-from-file" || cfg.OpenAI.APIKeyEnv != "TEST_OPENAI_API_KEY" || cfg.OpenAI.APIKey != "file-secret" || cfg.OpenAI.BaseURL != "https://file.invalid/v1" || cfg.OpenAI.CustomHeaders["x-context-provider"] != "Azure" || !cfg.OpenAI.DisableResponseStorage || cfg.OpenAI.ReasoningEffort != "medium" || cfg.OpenAI.ReasoningSummary != "concise" || cfg.OpenAI.ContextWindowTokens != 65432 {
 		t.Fatalf("unexpected OpenAI config: %#v", cfg.OpenAI)
 	}
 	if cfg.Database.Run.URL != "postgres://file.invalid/basetion" || cfg.Database.Dev.URL != "postgres://file.invalid/basetion_dev" || cfg.Session.Dir != "/tmp/file-sessions" || cfg.Agent.MaxIterations != 7 || !cfg.Agent.UnsafeDebugData || cfg.User.Name != "测试用户" || cfg.Log.File != "/tmp/basetion.log" {
 		t.Fatalf("unexpected config: %#v", cfg)
 	}
-	if fields := cfg.DiagnosticFields(); fields["api_key"] != nil || strings.Contains(fmt.Sprint(fields), cfg.OpenAI.APIKey) {
+	if fields := cfg.DiagnosticFields(); fields["api_key"] != nil || fields["custom_header_count"] != 1 || fields["response_storage_disabled"] != true || strings.Contains(fmt.Sprint(fields), cfg.OpenAI.APIKey) || strings.Contains(fmt.Sprint(fields), "Azure") {
 		t.Fatalf("diagnostics leaked API key: %#v", fields)
 	}
 }

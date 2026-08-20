@@ -44,13 +44,15 @@ type DatabaseProfileConfig struct {
 }
 
 type OpenAIConfig struct {
-	Model               string `mapstructure:"model"`
-	APIKeyEnv           string `mapstructure:"api_key_env"`
-	APIKey              string `mapstructure:"-"`
-	BaseURL             string `mapstructure:"base_url"`
-	ReasoningEffort     string `mapstructure:"reasoning_effort"`
-	ReasoningSummary    string `mapstructure:"reasoning_summary"`
-	ContextWindowTokens int    `mapstructure:"context_window_tokens"`
+	Model                  string            `mapstructure:"model"`
+	APIKeyEnv              string            `mapstructure:"api_key_env"`
+	APIKey                 string            `mapstructure:"-"`
+	BaseURL                string            `mapstructure:"base_url"`
+	CustomHeaders          map[string]string `mapstructure:"custom_headers"`
+	DisableResponseStorage bool              `mapstructure:"disable_response_storage"`
+	ReasoningEffort        string            `mapstructure:"reasoning_effort"`
+	ReasoningSummary       string            `mapstructure:"reasoning_summary"`
+	ContextWindowTokens    int               `mapstructure:"context_window_tokens"`
 }
 
 type SessionConfig struct {
@@ -181,6 +183,13 @@ func decodeConfigFile(path string) (Config, error) {
 	cfg.OpenAI.Model = strings.TrimSpace(cfg.OpenAI.Model)
 	cfg.OpenAI.APIKeyEnv = strings.TrimSpace(cfg.OpenAI.APIKeyEnv)
 	cfg.OpenAI.BaseURL = strings.TrimSpace(cfg.OpenAI.BaseURL)
+	normalizedHeaders := make(map[string]string, len(cfg.OpenAI.CustomHeaders))
+	for name, value := range cfg.OpenAI.CustomHeaders {
+		if name = strings.TrimSpace(name); name != "" {
+			normalizedHeaders[name] = strings.TrimSpace(value)
+		}
+	}
+	cfg.OpenAI.CustomHeaders = normalizedHeaders
 	cfg.OpenAI.ReasoningEffort = strings.TrimSpace(cfg.OpenAI.ReasoningEffort)
 	cfg.OpenAI.ReasoningSummary = strings.TrimSpace(cfg.OpenAI.ReasoningSummary)
 	cfg.Session.Dir = strings.TrimSpace(cfg.Session.Dir)
@@ -268,17 +277,19 @@ func (c DatabaseConfig) Validate() error {
 // intentionally omitted, and unsafe payload logging remains explicit.
 func (c Config) DiagnosticFields() map[string]any {
 	return map[string]any{
-		"model":                 c.OpenAI.Model,
-		"base_url_set":          c.OpenAI.BaseURL != "",
-		"reasoning_effort":      c.OpenAI.ReasoningEffort,
-		"reasoning_summary":     c.OpenAI.ReasoningSummary,
-		"database_run_set":      c.Database.Run.URL != "",
-		"database_dev_set":      c.Database.Dev.URL != "",
-		"session_dir":           c.Session.Dir,
-		"user_name":             c.User.Name,
-		"log_file":              c.Log.File,
-		"context_window_tokens": c.OpenAI.ContextWindowTokens,
-		"max_iterations":        c.Agent.MaxIterations,
-		"unsafe_debug_data":     c.Agent.UnsafeDebugData,
+		"model":                     c.OpenAI.Model,
+		"base_url_set":              c.OpenAI.BaseURL != "",
+		"custom_header_count":       len(c.OpenAI.CustomHeaders),
+		"response_storage_disabled": c.OpenAI.DisableResponseStorage,
+		"reasoning_effort":          c.OpenAI.ReasoningEffort,
+		"reasoning_summary":         c.OpenAI.ReasoningSummary,
+		"database_run_set":          c.Database.Run.URL != "",
+		"database_dev_set":          c.Database.Dev.URL != "",
+		"session_dir":               c.Session.Dir,
+		"user_name":                 c.User.Name,
+		"log_file":                  c.Log.File,
+		"context_window_tokens":     c.OpenAI.ContextWindowTokens,
+		"max_iterations":            c.Agent.MaxIterations,
+		"unsafe_debug_data":         c.Agent.UnsafeDebugData,
 	}
 }

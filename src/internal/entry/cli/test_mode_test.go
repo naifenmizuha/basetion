@@ -121,9 +121,9 @@ prompt = "b1"
 	}
 }
 
-func TestDefaultTestOutputPathUsesPrivateResultsDirectory(t *testing.T) {
-	got := defaultTestOutputPath("testdata/example.toml", "run-123")
-	want := filepath.Join(".basetion", "test-results", "example-run-123.jsonl")
+func TestDefaultTestOutputPathUsesTimestampedResultDirectory(t *testing.T) {
+	got := defaultTestOutputPath("testdata/example.toml", time.Date(2026, 8, 20, 19, 24, 56, 0, time.Local))
+	want := filepath.Join(".basetion", "test-results", "example-260820192456", "log.jsonl")
 	if got != want {
 		t.Fatalf("default output path=%q want %q", got, want)
 	}

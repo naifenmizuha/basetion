@@ -26,7 +26,7 @@ Skill Middleware 使用 Eino Ext 本地文件 Backend，从进程当前工作目
 - `record-game`：一次 `game.create` 录入已结束比赛、双方首发和连续 Play。
 - `manage-training`：球员每日自训记录。
 
-Skill 中间件动态提供模型可见的 `skill` 工具；业务工具列表显式注册 `team_fetch`、`team_query` 和 `team_modify`。各 Skill 均为自包含单文件，当前不使用引用文件或通用文件读取能力。
+Skill 中间件动态提供模型可见的 `skill` 工具；业务工具列表显式注册 `team_describe`、`team_fetch`、`team_query` 和 `team_modify`。各 Skill 均为自包含单文件，当前不使用引用文件或通用文件读取能力。
 
 ## 生命周期回调
 
@@ -36,4 +36,4 @@ Runtime 同时提供 Agent、AgenticModel 和 Tool 生命周期回调。默认�
 
 仅当 `agent.unsafe_debug_data=true`（或由 `BASETION_UNSAFE_DEBUG_DATA=true` 覆盖）时，回调才记录模型输入输出和工具完整载荷。logger 为空时使用丢弃输出的 logger，避免 nil 引用。
 
-批量测试可通过 Context 显式附加 `TurnTrace`。状态栏装饰器会为每次模型请求记录序号、该请求中 total token 最大的一份 token usage 快照及模型调用错误；不保存完整输入、临时状态栏或模型输出。普通运行未附加 Trace 时不会保留这些数据。Trace 由入口在轮次结束后写入测试 JSONL，不写入业务 Session、运行日志或 Telemetry 汇总。
+批量测试可通过 Context 显式附加 `TurnTrace`。状态栏装饰器会为每次模型请求记录序号、该请求中 total token 最大的一份 token usage 快照、其中的 `cached_tokens` 与模型调用错误；不保存完整输入、临时状态栏或模型输出。普通运行未附加 Trace 时不会保留这些数据。Trace 由入口在轮次结束后写入测试 JSONL，不写入业务 Session、运行日志或 Telemetry 汇总。

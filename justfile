@@ -9,7 +9,7 @@ mod sqlc 'just/sqlc.just'
 
 # Run the named TOML test cases and evaluate their JSONL result.
 test test_toml:
-    cd {{ justfile_directory() }} && result_path="$(python3 -c 'import sys, uuid; from pathlib import Path; print(Path(".basetion") / "test-results" / f"{Path(sys.argv[1]).stem}-{uuid.uuid4().hex}.jsonl")' "{{ test_toml }}")" && just test-run "{{ test_toml }}" "$result_path" && just test-evaluate "$result_path"
+    cd {{ justfile_directory() }} && result_path="$(python3 -c 'import sys; from datetime import datetime; from pathlib import Path; print(Path(".basetion") / "test-results" / "{}-{}".format(Path(sys.argv[1]).stem, datetime.now().strftime("%y%m%d%H%M%S")) / "log.jsonl")' "{{ test_toml }}")" && just test-run "{{ test_toml }}" "$result_path" && just test-evaluate "$result_path"
 
 # Run the TOML cases through the Go application and write the requested JSONL.
 test-run test_toml result_path:

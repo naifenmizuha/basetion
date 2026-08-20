@@ -60,12 +60,8 @@ func WithTeamModifyIDGenerator(generator IDGenerator) TeamModifyOption {
 }
 
 type teamModifyInput struct {
-	Mode       string               `json:"mode" jsonschema:"required,description=操作模式：describe 按需加载修改操作说明，execute 执行预定义操作,enum=describe,enum=execute"`
-	Topics     *[]string            `json:"topics,omitempty" jsonschema:"description=仅 describe 使用：要加载的精确操作 topic；省略时返回顶层目录"`
-	Operation  *string              `json:"operation,omitempty" jsonschema:"description=仅 execute 单项调用使用：通过 describe 获得的精确操作名称"`
-	Arguments  *map[string]any      `json:"arguments,omitempty" jsonschema:"description=仅 execute 单项调用使用：操作所需的结构化参数"`
-	Operations *[]teamModifyRequest `json:"operations,omitempty" jsonschema:"description=仅 execute 批量调用使用：按数组顺序执行的操作；与 operation 和 arguments 互斥"`
-	Confirmed  *bool                `json:"confirmed,omitempty" jsonschema:"description=仅 execute 使用：用户确认完整修改后必须为 true"`
+	Confirmed  bool                `json:"confirmed" jsonschema:"required,description=用户确认完整修改后必须为 true"`
+	Operations []teamModifyRequest `json:"operations" jsonschema:"required,description=按数组顺序执行的预定义修改；单项修改也传一个元素；遇错中止且不回滚"`
 }
 
 type teamModifyRequest struct {
@@ -103,14 +99,10 @@ type modifyTopicDescription struct {
 }
 
 type teamModifyOutput struct {
-	Mode           string                   `json:"mode"`
-	Topics         []modifyTopicDescription `json:"topics,omitempty"`
-	Operation      string                   `json:"operation,omitempty"`
-	Result         any                      `json:"result,omitempty"`
-	Status         string                   `json:"status,omitempty"`
-	Results        []teamModifyResult       `json:"results,omitempty"`
-	StoppedAt      *teamModifyStoppedAt     `json:"stopped_at,omitempty"`
-	ContextReceipt *toolContextReceipt      `json:"context_receipt,omitempty"`
+	Status         string               `json:"status,omitempty"`
+	Results        []teamModifyResult   `json:"results,omitempty"`
+	StoppedAt      *teamModifyStoppedAt `json:"stopped_at,omitempty"`
+	ContextReceipt *toolContextReceipt  `json:"context_receipt,omitempty"`
 }
 
 // toolContextReceipt is a compact, model-visible record that permits the
@@ -167,6 +159,22 @@ type teamModifyHandler struct {
 }
 
 func NewTeamModify(teams TeamModifier, players PlayerModifier, games GameModifier, trainingService TrainingModifier, options ...TeamModifyOption) (tool.InvokableTool, error) {
+	handler, err := newTeamModifyHandler(teams, players, games, trainingService, options...)
+	if err != nil {
+		return nil, err
+	}
+	return newTeamModifyTool(handler)
+}
+
+func newTeamModifyTool(handler *teamModifyHandler) (tool.InvokableTool, error) {
+	return toolutils.InferTool(
+		TeamModifyToolName,
+		"执行已通过 team_describe 读取说明的预定义球队数据修改。用户确认后传入非空 operations 数组；按顺序执行，遇错中止且不回滚，并返回逐项结果。该工具不接受脚本或数据库语句。",
+		handler.invoke,
+	)
+}
+
+func newTeamModifyHandler(teams TeamModifier, players PlayerModifier, games GameModifier, trainingService TrainingModifier, options ...TeamModifyOption) (*teamModifyHandler, error) {
 	if teams == nil || players == nil || games == nil || trainingService == nil {
 		return nil, errors.New("team modify services are required")
 	}
@@ -177,67 +185,22 @@ func NewTeamModify(teams TeamModifier, players PlayerModifier, games GameModifie
 	if settings.newID == nil {
 		return nil, errors.New("team modify id generator is required")
 	}
-	handler := &teamModifyHandler{teams: teams, players: players, games: games, training: trainingService, newID: settings.newID, operations: defaultModifyOperations()}
-	return toolutils.InferTool(
-		TeamModifyToolName,
-		"发现并执行预定义的球队数据修改操作。先用 describe 一次加载所需操作及参数；获得用户对完整修改的明确确认后，才能用 execute 执行。多个修改通过 operations 一次提交，按数组顺序执行，遇错中止且不回滚，并返回失败位置、原因和未执行步骤。该工具不接受脚本或数据库语句。",
-		handler.invoke,
-	)
+	return &teamModifyHandler{teams: teams, players: players, games: games, training: trainingService, newID: settings.newID, operations: defaultModifyOperations()}, nil
 }
 
 func (h *teamModifyHandler) invoke(ctx context.Context, input teamModifyInput) (teamModifyOutput, error) {
-	switch strings.TrimSpace(input.Mode) {
-	case "describe":
-		if input.Operation != nil || input.Arguments != nil || input.Operations != nil || input.Confirmed != nil {
-			return teamModifyOutput{}, errors.New("team_modify describe only accepts topics")
-		}
-		return teamModifyOutput{Mode: "describe", Topics: h.describe(stringSlice(input.Topics))}, nil
-	case "execute":
-		if input.Topics != nil {
-			return teamModifyOutput{}, errors.New("team_modify execute does not accept topics")
-		}
-		if input.Confirmed == nil || !*input.Confirmed {
-			return teamModifyOutput{}, errors.New("team_modify execute requires confirmed=true after user confirmation")
-		}
-		if input.Operations != nil {
-			if input.Operation != nil || input.Arguments != nil {
-				return teamModifyOutput{}, errors.New("team_modify execute accepts either operations or operation with arguments, not both")
-			}
-			return h.executeBatch(ctx, *input.Operations)
-		}
-		operation := strings.TrimSpace(stringValue(input.Operation))
-		if _, exists := h.operations[operation]; !exists {
-			return teamModifyOutput{}, fmt.Errorf("unknown team modify operation %q", operation)
-		}
-		if input.Arguments == nil {
-			return teamModifyOutput{}, errors.New("team_modify execute requires arguments")
-		}
-		result, err := h.execute(ctx, operation, *input.Arguments)
-		if err != nil {
-			var partial *partialModifyError
-			if errors.As(err, &partial) {
-				return teamModifyOutput{Mode: "execute", Operation: operation, Result: partial.result, Status: "partial"}, nil
-			}
-			return teamModifyOutput{}, fmt.Errorf("execute team modify operation %s: %w", operation, err)
-		}
-		output := teamModifyOutput{Mode: "execute", Operation: operation, Result: result}
-		if operation == "game.create" {
-			if progress, ok := result.(game.GameCreateProgress); ok && progress.Status == "succeeded" {
-				output.ContextReceipt = &toolContextReceipt{Kind: "completed_write", Operation: operation, Summary: fmt.Sprintf("已记录 %s（主）对 %s（客）的比赛；已创建 %d 套阵容和 %d 个 Play。", progress.HomeTeamName, progress.AwayTeamName, progress.CompletedLineups, progress.CompletedPlays)}
-			}
-		}
-		return output, nil
-	default:
-		return teamModifyOutput{}, fmt.Errorf("team_modify mode must be describe or execute, got %q", input.Mode)
+	if !input.Confirmed {
+		return teamModifyOutput{}, errors.New("team_modify requires confirmed=true after user confirmation")
 	}
+	return h.executeBatch(ctx, input.Operations)
 }
 
 func (h *teamModifyHandler) executeBatch(ctx context.Context, requests []teamModifyRequest) (teamModifyOutput, error) {
 	if len(requests) == 0 {
-		return teamModifyOutput{}, errors.New("team_modify execute operations must not be empty")
+		return teamModifyOutput{}, errors.New("team_modify operations must not be empty")
 	}
 	if len(requests) > maxTeamModifyBatchSize {
-		return teamModifyOutput{}, fmt.Errorf("team_modify execute accepts at most %d operations", maxTeamModifyBatchSize)
+		return teamModifyOutput{}, fmt.Errorf("team_modify accepts at most %d operations", maxTeamModifyBatchSize)
 	}
 	seen := make(map[string]struct{}, len(requests))
 	for index := range requests {
@@ -262,11 +225,16 @@ func (h *teamModifyHandler) executeBatch(ctx context.Context, requests []teamMod
 		}
 	}
 
-	output := teamModifyOutput{Mode: "execute", Status: "succeeded", Results: make([]teamModifyResult, 0, len(requests))}
+	output := teamModifyOutput{Status: "succeeded", Results: make([]teamModifyResult, 0, len(requests))}
 	for index, request := range requests {
 		result, err := h.execute(ctx, request.Operation, request.Arguments)
 		if err == nil {
 			output.Results = append(output.Results, teamModifyResult{Index: index, Key: request.Key, Operation: request.Operation, Status: "succeeded", Result: result})
+			if len(requests) == 1 && request.Operation == "game.create" {
+				if progress, ok := result.(game.GameCreateProgress); ok && progress.Status == "succeeded" {
+					output.ContextReceipt = &toolContextReceipt{Kind: "completed_write", Operation: request.Operation, Summary: fmt.Sprintf("已记录 %s（主）对 %s（客）的比赛；已创建 %d 套阵容和 %d 个 Play。", progress.HomeTeamName, progress.AwayTeamName, progress.CompletedLineups, progress.CompletedPlays)}
+				}
+			}
 			continue
 		}
 		reason := err.Error()

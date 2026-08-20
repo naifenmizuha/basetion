@@ -22,15 +22,21 @@ func NewAgenticModel(ctx context.Context) (model.AgenticModel, error) {
 }
 
 func responsesConfig(cfg appconfig.OpenAIConfig) *agenticopenai.ResponsesConfig {
-	return &agenticopenai.ResponsesConfig{
-		Model:   cfg.Model,
-		APIKey:  cfg.APIKey,
-		BaseURL: cfg.BaseURL,
+	result := &agenticopenai.ResponsesConfig{
+		Model:         cfg.Model,
+		APIKey:        cfg.APIKey,
+		BaseURL:       cfg.BaseURL,
+		CustomHeaders: cfg.CustomHeaders,
 		Reasoning: &responses.ReasoningParam{
 			Effort:  responses.ReasoningEffort(cfg.ReasoningEffort),
 			Summary: responses.ReasoningSummary(cfg.ReasoningSummary),
 		},
 	}
+	if cfg.DisableResponseStorage {
+		disabled := false
+		result.Store = &disabled
+	}
+	return result
 }
 
 var _ model.AgenticModel = (*agenticopenai.ResponsesModel)(nil)

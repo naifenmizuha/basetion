@@ -53,22 +53,11 @@ func newTestTeamFetchTool(t *testing.T) (*fetchGameRepository, tool.InvokableToo
 	return repository, value
 }
 
-func TestTeamFetchDescribesAndExecutesEveryCompositeRead(t *testing.T) {
+func TestTeamFetchExecutesEveryCompositeRead(t *testing.T) {
 	t.Parallel()
 	repository, value := newTestTeamFetchTool(t)
-	description, err := value.InvokableRun(context.Background(), `{"mode":"describe","topics":["game.performances","unknown"]}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var described teamFetchOutput
-	if err := json.Unmarshal([]byte(description), &described); err != nil {
-		t.Fatal(err)
-	}
-	if described.Mode != "describe" || len(described.Topics) != 2 || !described.Topics[0].Found || described.Topics[1].Found {
-		t.Fatalf("description=%#v", described)
-	}
 	for _, operation := range []string{"game.summaries", "game.records", "game.lineups", "game.performances"} {
-		output, err := value.InvokableRun(context.Background(), `{"mode":"fetch","operation":"`+operation+`","arguments":{"limit":1}}`)
+		output, err := value.InvokableRun(context.Background(), `{"operation":"`+operation+`","arguments":{"limit":1}}`)
 		if err != nil {
 			t.Fatalf("%s: %v", operation, err)
 		}
@@ -85,16 +74,36 @@ func TestTeamFetchDescribesAndExecutesEveryCompositeRead(t *testing.T) {
 	}
 }
 
-func TestTeamFetchRejectsProgramsAndUnboundedLimit(t *testing.T) {
+func TestTeamFetchRejectsInvalidOperationsAndUnboundedLimit(t *testing.T) {
 	t.Parallel()
 	_, value := newTestTeamFetchTool(t)
 	for _, input := range []string{
-		`{"mode":"fetch","operation":"game.performances","arguments":{"limit":0}}`,
-		`{"mode":"fetch","operation":"unknown"}`,
-		`{"mode":"describe","operation":"game.records"}`,
+		`{"operation":"game.performances","arguments":{"limit":0}}`,
+		`{"operation":"unknown"}`,
+		`{"arguments":{}}`,
 	} {
 		if _, err := value.InvokableRun(context.Background(), input); err == nil {
 			t.Fatalf("invalid input accepted: %s", input)
+		}
+	}
+}
+
+func TestTeamFetchSchemaIsExecuteOnly(t *testing.T) {
+	_, value := newTestTeamFetchTool(t)
+	info, err := value.Info(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parameters, err := info.ParamsOneOf.ToJSONSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := parameters.Properties.Get("operation"); !ok {
+		t.Fatalf("missing operation: %#v", parameters)
+	}
+	for _, field := range []string{"mode", "topics", "program", "confirmed", "operations"} {
+		if _, ok := parameters.Properties.Get(field); ok {
+			t.Fatalf("unexpected %q: %#v", field, parameters)
 		}
 	}
 }

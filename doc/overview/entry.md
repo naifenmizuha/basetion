@@ -13,10 +13,10 @@
 
 普通 CLI 要求至少一个非空提示词。`--profile run|dev` 选择 TOML 中的数据库配置，默认 run；`--session-id <ID>` 可选。未提供 Session ID 时生成 `session-<32 位十六进制>`，显式 ID 用于续接对应 Session。参数或配置错误退出码为 2，其余初始化和会话错误为 1，成功为 0。
 
-`basetion test --input <cases.toml> [--output <results.jsonl>] [--max-concurrency N]` 是批量入口。输入采用 `[[test.<run-name>]]` 数组表；同名表按声明顺序构成一条连续 Session，不同名称的 Session 受并发上限控制。每张表必须有 `prompt`，可选 `expect_tools`、`expect_skills` 和 `forbid_tools` 声明确定性评测的路径要求。测试 Session 使用运行期内存存储，不写入 `session.dir`；结果每轮一条 JSONL，未指定输出路径时写入 `.basetion/test-results/`。批量轮次失败、缺失预期路径或调用禁用工具都会以非零状态结束相应命令。
+`basetion test --input <cases.toml> [--output <results.jsonl>] [--max-concurrency N]` 是批量入口。输入采用 `[[test.<run-name>]]` 数组表；同名表按声明顺序构成一条连续 Session，不同名称的 Session 受并发上限控制。每张表必须有 `prompt`，可选 `expect_tools`、`expect_skills` 和 `forbid_tools` 声明确定性评测的路径要求。测试 Session 使用运行期内存存储，不写入 `session.dir`；结果每轮一条 JSONL，未指定输出路径时写入 `.basetion/test-results/<用例名-YYMMDDhhmmss>/log.jsonl`。批量轮次失败、缺失预期路径或调用禁用工具都会以非零状态结束相应命令。
 
 ## 输出渲染
 
 `Render` 顺序消费 AgentEvent：reasoning 标记为 `[思考]`，助手文本按流式块累计并以 `[回复]` 输出，工具调用和结果显示工具名、call ID 与内容，动作显示为 `[动作]`，正常关闭输出 `[完成]`。入口层不负责 Session、模型或工具业务规则。
 
-批量入口不复用终端渲染，而是写出 schema version 2 的结构化事件、模型请求 token Trace 和每轮预期字段。`scripts/evaluate_test_results.py <results.jsonl>` 只读取 JSONL，输出同名 `.evaluation.json`、`.report.md` 与终端摘要；它统计轮次与 run 的耗时、并发墙钟时间、token、工具和 Skill，且对运行失败、缺失预期和禁用工具调用返回非零。JSONL 不复制模型输入、状态栏或模型输出；Markdown 报告从结构化事件呈现 Prompt、可见思考、工具调用、工具结果和回复。
+批量入口不复用终端渲染，而是写出 schema version 2 的结构化事件、模型请求 token Trace 和每轮预期字段。`scripts/evaluate_test_results.py <results.jsonl>` 只读取 JSONL；当输入名为 `log.jsonl` 时在同一目录输出 `evaluation.json`、`report.md` 与终端摘要，否则使用输入文件的 `.evaluation.json`、`.report.md` 后缀。它统计轮次与 run 的耗时、并发墙钟时间、prompt 中的 `cached_tokens`、其余 token、工具和 Skill，且对运行失败、缺失预期和禁用工具调用返回非零。JSONL 不复制模型输入、状态栏或模型输出；Markdown 报告从结构化事件呈现 Prompt、可见思考、工具调用、工具结果和回复。

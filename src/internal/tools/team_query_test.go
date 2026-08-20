@@ -30,28 +30,15 @@ func newTestTeamQueryTool(t *testing.T) tool.InvokableTool {
 	return teamQueryTool
 }
 
-func TestTeamQueryToolDescribeAndQuery(t *testing.T) {
+func TestTeamQueryToolExecutesQuery(t *testing.T) {
 	t.Parallel()
 	teamQueryTool := newTestTeamQueryTool(t)
 
-	descriptionJSON, err := teamQueryTool.InvokableRun(context.Background(), `{"mode":"describe","topics":["team.list","unknown","team.list"]}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var description teamQueryOutput
-	if err := json.Unmarshal([]byte(descriptionJSON), &description); err != nil {
-		t.Fatal(err)
-	}
-	if description.Mode != "describe" || len(description.Topics) != 2 || description.Topics[0].Name != "team.list" || !description.Topics[0].Found || description.Topics[1].Found || description.Topics[1].Error != "unknown team query topic" {
-		t.Fatalf("unexpected description: %#v", description)
-	}
-
-	queryJSON, err := teamQueryTool.InvokableRun(context.Background(), `{"mode":"query","program":"function main(data) return {total = 2 + 3} end"}`)
+	queryJSON, err := teamQueryTool.InvokableRun(context.Background(), `{"program":"function main(data) return {total = 2 + 3} end"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var query struct {
-		Mode   string `json:"mode"`
 		Result struct {
 			Total float64 `json:"total"`
 		} `json:"result"`
@@ -59,12 +46,12 @@ func TestTeamQueryToolDescribeAndQuery(t *testing.T) {
 	if err := json.Unmarshal([]byte(queryJSON), &query); err != nil {
 		t.Fatal(err)
 	}
-	if query.Mode != "query" || query.Result.Total != 5 {
+	if query.Result.Total != 5 {
 		t.Fatalf("unexpected query output: %#v", query)
 	}
 }
 
-func TestTeamQueryToolSchemaAdvertisesModes(t *testing.T) {
+func TestTeamQueryToolSchemaIsExecuteOnly(t *testing.T) {
 	t.Parallel()
 	teamQueryTool := newTestTeamQueryTool(t)
 	info, err := teamQueryTool.Info(context.Background())
@@ -78,12 +65,13 @@ func TestTeamQueryToolSchemaAdvertisesModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mode, ok := parameters.Properties.Get("mode")
-	if !ok || len(mode.Enum) != 2 || mode.Enum[0] != "describe" || mode.Enum[1] != "query" {
-		t.Fatalf("unexpected mode schema: %#v", mode)
+	if _, ok := parameters.Properties.Get("program"); !ok {
+		t.Fatalf("program field is missing from schema: %#v", parameters)
 	}
-	if _, ok := parameters.Properties.Get("topics"); !ok {
-		t.Fatalf("topics field is missing from schema: %#v", parameters)
+	for _, field := range []string{"mode", "topics"} {
+		if _, ok := parameters.Properties.Get(field); ok {
+			t.Fatalf("unexpected %q in schema: %#v", field, parameters)
+		}
 	}
 }
 
@@ -91,12 +79,9 @@ func TestTeamQueryToolValidation(t *testing.T) {
 	t.Parallel()
 	teamQueryTool := newTestTeamQueryTool(t)
 	tests := []string{
-		`{"mode":"invalid"}`,
-		`{"mode":"describe","program":"function main() end"}`,
-		`{"mode":"describe","program":""}`,
-		`{"mode":"query","topics":["player.list"],"program":"function main() end"}`,
-		`{"mode":"query","topics":[],"program":"function main() end"}`,
-		`{"mode":"query"}`,
+		`{}`,
+		`{"program":""}`,
+		`{"program":"not valid Lua"}`,
 	}
 	for _, input := range tests {
 		if _, err := teamQueryTool.InvokableRun(context.Background(), input); err == nil {
@@ -117,7 +102,7 @@ func TestTeamQueryToolNodePreservesCallID(t *testing.T) {
 		ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.FunctionToolCall{
 			CallID:    "team-query-call-1",
 			Name:      TeamQueryToolName,
-			Arguments: `{"mode":"query","program":"function main() return {count = 4} end"}`,
+			Arguments: `{"program":"function main() return {count = 4} end"}`,
 		})},
 	})
 	if err != nil {
