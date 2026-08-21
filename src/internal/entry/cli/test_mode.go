@@ -26,16 +26,23 @@ import (
 const defaultTestConcurrency = 4
 
 type testCases struct {
-	Runs []testRun
+	Runs           []testRun
+	MaxConcurrency int
+}
+
+type testSettings struct {
+	MaxConcurrency *int `toml:"max_concurrency"`
 }
 
 type testCasesFile struct {
-	Test map[string][]testCase `toml:"test"`
+	Settings testSettings          `toml:"settings"`
+	Test     map[string][]testCase `toml:"test"`
 }
 
 type testRun struct {
-	Name  string
-	Cases []testCase
+	Name      string
+	Cases     []testCase
+	DependsOn []string
 }
 
 type testCase struct {
@@ -43,6 +50,7 @@ type testCase struct {
 	ExpectTools  []string `toml:"expect_tools"`
 	ExpectSkills []string `toml:"expect_skills"`
 	ForbidTools  []string `toml:"forbid_tools"`
+	DependsOn    []string `toml:"depends_on"`
 }
 
 type testResult struct {
@@ -82,7 +90,6 @@ func ExecuteTest(ctx context.Context, args []string, conversation Conversation, 
 	flags.SetOutput(io.Discard)
 	inputPath := flags.String("input", "", "测试用例 TOML")
 	outputPath := flags.String("output", "", "结果 JSONL")
-	maxConcurrency := flags.Int("max-concurrency", defaultTestConcurrency, "最大并发 Session 数")
 	if err := flags.Parse(args); err != nil || len(flags.Args()) != 0 {
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
@@ -90,8 +97,8 @@ func ExecuteTest(ctx context.Context, args []string, conversation Conversation, 
 		fmt.Fprintln(stderr, usage)
 		return 2
 	}
-	if strings.TrimSpace(*inputPath) == "" || *maxConcurrency <= 0 {
-		fmt.Fprintln(stderr, "test 需要非空的 --input，且 --max-concurrency 必须为正数")
+	if strings.TrimSpace(*inputPath) == "" {
+		fmt.Fprintln(stderr, "test 需要非空的 --input")
 		return 2
 	}
 	cases, err := loadTestCases(*inputPath)
@@ -115,22 +122,87 @@ func ExecuteTest(ctx context.Context, args []string, conversation Conversation, 
 	}
 	defer writer.Close()
 
-	fmt.Fprintf(stdout, "[测试] run_id=%s runs=%d max_concurrency=%d output=%s\n", runID, len(cases.Runs), *maxConcurrency, resolvedOutputPath)
-	semaphore := make(chan struct{}, *maxConcurrency)
+	fmt.Fprintf(stdout, "[测试] run_id=%s runs=%d max_concurrency=%d output=%s\n", runID, len(cases.Runs), cases.MaxConcurrency, resolvedOutputPath)
+	semaphore := make(chan struct{}, cases.MaxConcurrency)
 	var group sync.WaitGroup
 	var failures int
 	var resultMu sync.Mutex
+
+	runDone := make(map[string]chan struct{}, len(cases.Runs))
+	runFailed := make(map[string]*bool, len(cases.Runs))
+	var stateMu sync.Mutex
+	for _, run := range cases.Runs {
+		runDone[run.Name] = make(chan struct{})
+		failed := false
+		runFailed[run.Name] = &failed
+	}
+
 	for sessionIndex, run := range cases.Runs {
 		group.Add(1)
 		go func(sessionIndex int, run testRun) {
 			defer group.Done()
+			for _, dep := range run.DependsOn {
+				select {
+				case <-runDone[dep]:
+				case <-ctx.Done():
+					return
+				}
+			}
+			stateMu.Lock()
+			failedDep := ""
+			for _, dep := range run.DependsOn {
+				if *runFailed[dep] {
+					failedDep = dep
+					break
+				}
+			}
+			stateMu.Unlock()
+			sessionID := fmt.Sprintf("test-%s-%s", runID, run.Name)
+			markDone := func(failed bool) {
+				stateMu.Lock()
+				*runFailed[run.Name] = failed
+				stateMu.Unlock()
+				close(runDone[run.Name])
+			}
+			if failedDep != "" {
+				for turnIndex, testCase := range run.Cases {
+					result := testResult{
+						SchemaVersion: 2,
+						RunID:         runID,
+						StartedAt:     time.Now().UTC(),
+						FinishedAt:    time.Now().UTC(),
+						RunName:       run.Name,
+						SessionID:     sessionID,
+						SessionIndex:  sessionIndex + 1,
+						TurnIndex:     turnIndex + 1,
+						Prompt:        testCase.Prompt,
+						ExpectTools:   testCase.ExpectTools,
+						ExpectSkills:  testCase.ExpectSkills,
+						ForbidTools:   testCase.ForbidTools,
+						Status:        "skipped",
+						Error:         fmt.Sprintf("dependency %q failed", failedDep),
+						Events:        nil,
+						ModelRequests: nil,
+					}
+					if err := writer.Write(result); err != nil {
+						result.Error = fmt.Sprintf("write test result: %v", err)
+					}
+					resultMu.Lock()
+					fmt.Fprintf(stdout, "[测试] run=%s turn=%d status=%s\n", run.Name, turnIndex+1, result.Status)
+					failures++
+					resultMu.Unlock()
+				}
+				markDone(true)
+				return
+			}
 			select {
 			case semaphore <- struct{}{}:
 			case <-ctx.Done():
+				markDone(true)
 				return
 			}
 			defer func() { <-semaphore }()
-			sessionID := fmt.Sprintf("test-%s-%s", runID, run.Name)
+			runHadFailure := false
 			for turnIndex, testCase := range run.Cases {
 				result := runTestTurn(ctx, conversation, runID, run.Name, sessionID, sessionIndex, turnIndex, testCase)
 				if err := writer.Write(result); err != nil {
@@ -141,9 +213,11 @@ func ExecuteTest(ctx context.Context, args []string, conversation Conversation, 
 				fmt.Fprintf(stdout, "[测试] run=%s turn=%d status=%s\n", run.Name, turnIndex+1, result.Status)
 				if result.Status != "completed" {
 					failures++
+					runHadFailure = true
 				}
 				resultMu.Unlock()
 			}
+			markDone(runHadFailure)
 		}(sessionIndex, run)
 	}
 	group.Wait()
@@ -169,6 +243,13 @@ func loadTestCases(path string) (testCases, error) {
 	}
 	if len(source.Test) == 0 {
 		return testCases{}, errors.New("test must contain at least one named run")
+	}
+	maxConcurrency := defaultTestConcurrency
+	if source.Settings.MaxConcurrency != nil {
+		if *source.Settings.MaxConcurrency <= 0 {
+			return testCases{}, fmt.Errorf("settings.max_concurrency must be a positive integer")
+		}
+		maxConcurrency = *source.Settings.MaxConcurrency
 	}
 	names := make([]string, 0, len(source.Test))
 	for name := range source.Test {
@@ -207,13 +288,98 @@ func loadTestCases(path string) (testCases, error) {
 					return testCases{}, fmt.Errorf("test.%s[%d] both expects and forbids tool %q", name, index, toolName)
 				}
 			}
+			if len(entry.DependsOn) > 0 {
+				if index != 0 {
+					return testCases{}, fmt.Errorf("test.%s[%d].depends_on must be set only on the first table of the run", name, index)
+				}
+				dependsOn, err := normalizeTestNames(entry.DependsOn, fmt.Sprintf("test.%s[%d].depends_on", name, index))
+				if err != nil {
+					return testCases{}, err
+				}
+				run.DependsOn = dependsOn
+			}
 			run.Cases = append(run.Cases, testCase{
 				Prompt: prompt, ExpectTools: expectTools, ExpectSkills: expectSkills, ForbidTools: forbidTools,
 			})
 		}
 		cases.Runs = append(cases.Runs, run)
 	}
+	if err := validateTestDependencies(cases.Runs); err != nil {
+		return testCases{}, err
+	}
+	ordered, err := sortTestRunsTopologically(cases.Runs)
+	if err != nil {
+		return testCases{}, err
+	}
+	cases.Runs = ordered
+	cases.MaxConcurrency = maxConcurrency
 	return cases, nil
+}
+
+func validateTestDependencies(runs []testRun) error {
+	known := make(map[string]struct{}, len(runs))
+	for _, run := range runs {
+		known[run.Name] = struct{}{}
+	}
+	for _, run := range runs {
+		for _, dep := range run.DependsOn {
+			if dep == run.Name {
+				return fmt.Errorf("test.%s must not depend on itself", run.Name)
+			}
+			if _, ok := known[dep]; !ok {
+				return fmt.Errorf("test.%s.depends_on references unknown run %q", run.Name, dep)
+			}
+		}
+	}
+	return nil
+}
+
+func sortTestRunsTopologically(runs []testRun) ([]testRun, error) {
+	indexByName := make(map[string]int, len(runs))
+	inDegree := make(map[string]int, len(runs))
+	dependents := make(map[string][]string, len(runs))
+	for index, run := range runs {
+		indexByName[run.Name] = index
+		inDegree[run.Name] = len(run.DependsOn)
+	}
+	for _, run := range runs {
+		for _, dep := range run.DependsOn {
+			dependents[dep] = append(dependents[dep], run.Name)
+		}
+	}
+	ready := make([]string, 0, len(runs))
+	for _, run := range runs {
+		if inDegree[run.Name] == 0 {
+			ready = append(ready, run.Name)
+		}
+	}
+	sort.Strings(ready)
+	ordered := make([]testRun, 0, len(runs))
+	for len(ready) > 0 {
+		name := ready[0]
+		ready = ready[1:]
+		ordered = append(ordered, runs[indexByName[name]])
+		next := dependents[name]
+		sort.Strings(next)
+		for _, dependent := range next {
+			inDegree[dependent]--
+			if inDegree[dependent] == 0 {
+				ready = append(ready, dependent)
+			}
+		}
+		sort.Strings(ready)
+	}
+	if len(ordered) != len(runs) {
+		remaining := make([]string, 0)
+		for _, run := range runs {
+			if inDegree[run.Name] > 0 {
+				remaining = append(remaining, run.Name)
+			}
+		}
+		sort.Strings(remaining)
+		return nil, fmt.Errorf("test.depends_on contains a cycle involving runs: %s", strings.Join(remaining, ", "))
+	}
+	return ordered, nil
 }
 
 func normalizeTestNames(values []string, field string) ([]string, error) {

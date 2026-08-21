@@ -66,6 +66,49 @@ func (q *Queries) GetTeam(ctx context.Context, id string) (GetTeamRow, error) {
 	return i, err
 }
 
+const getTeamsByIDs = `-- name: GetTeamsByIDs :many
+SELECT id::text, name, active, created_at, updated_at, deleted_at
+FROM teams
+WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL
+ORDER BY name
+`
+
+type GetTeamsByIDsRow struct {
+	ID        string
+	Name      string
+	Active    bool
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+	DeletedAt pgtype.Timestamptz
+}
+
+func (q *Queries) GetTeamsByIDs(ctx context.Context, ids []string) ([]GetTeamsByIDsRow, error) {
+	rows, err := q.db.Query(ctx, getTeamsByIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetTeamsByIDsRow{}
+	for rows.Next() {
+		var i GetTeamsByIDsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Active,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getTeamsByNames = `-- name: GetTeamsByNames :many
 SELECT id::text, name, active, created_at, updated_at, deleted_at
 FROM teams

@@ -8,6 +8,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/naifenmizuha/basetion/src/internal/domain/game"
 	domain "github.com/naifenmizuha/basetion/src/internal/domain/teamquery"
+	"github.com/naifenmizuha/basetion/src/internal/domain/training"
 	infrateamquery "github.com/naifenmizuha/basetion/src/internal/infra/teamquery"
 )
 
@@ -25,7 +26,11 @@ func newTestTeamTools(t *testing.T) []tool.InvokableTool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tools, err := NewTeamTools(query, games, &teamModifyTestService{}, testPlayerModifier{}, &teamModifyTestService{}, testTrainingModifier{}, WithTeamModifyIDGenerator(func() string { return "generated-id" }))
+	trainings, err := training.NewQueryService(&fetchTrainingRepository{}, training.WithPlayerReader(&fetchTrainingPlayerReader{}), training.WithTeamReader(&fetchTrainingTeamReader{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools, err := NewTeamTools(query, games, trainings, &teamModifyTestService{}, testPlayerModifier{}, &teamModifyTestService{}, testTrainingModifier{}, WithTeamModifyIDGenerator(func() string { return "generated-id" }))
 	if err != nil {
 		t.Fatal(err)
 	}

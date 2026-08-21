@@ -13,7 +13,7 @@
 
 普通 CLI 要求至少一个非空提示词。`--profile run|dev` 选择 TOML 中的数据库配置，默认 run；`--session-id <ID>` 可选。未提供 Session ID 时生成 `session-<32 位十六进制>`，显式 ID 用于续接对应 Session。参数或配置错误退出码为 2，其余初始化和会话错误为 1，成功为 0。
 
-`basetion test --input <cases.toml> [--output <results.jsonl>] [--max-concurrency N]` 是批量入口。输入采用 `[[test.<run-name>]]` 数组表；同名表按声明顺序构成一条连续 Session，不同名称的 Session 受并发上限控制。每张表必须有 `prompt`，可选 `expect_tools`、`expect_skills` 和 `forbid_tools` 声明确定性评测的路径要求。测试 Session 使用运行期内存存储，不写入 `session.dir`；结果每轮一条 JSONL，未指定输出路径时写入 `.basetion/test-results/<用例名-YYMMDDhhmmss>/log.jsonl`。批量轮次失败、缺失预期路径或调用禁用工具都会以非零状态结束相应命令。
+`basetion test --input <cases.toml> [--output <results.jsonl>]` 是批量入口。输入采用 `[[test.<run-name>]]` 数组表；同名表按声明顺序构成一条连续 Session，不同名称的 Session 受并发上限控制。可选的 `[settings]` 表通过 `max_concurrency`（正整数，缺省 4）控制同时运行的 Session 数；run 首个表可通过 `depends_on = ["<其他 run 名>"]` 声明 run 级依赖，调度器按拓扑稳定字典序启动 goroutine，被依赖的 run 全部完成前依赖方不会启动，上游任一 turn 失败会使依赖方整 run 输出 `status="skipped"`。`depends_on` 引用必须存在、不得自依赖、不得成环，且只允许写在 run 的首个表上。每张表必须有 `prompt`，可选 `expect_tools`、`expect_skills` 和 `forbid_tools` 声明确定性评测的路径要求。测试 Session 使用运行期内存存储，不写入 `session.dir`；结果每轮一条 JSONL，未指定输出路径时写入 `.basetion/test-results/<用例名-YYMMDDhhmmss>/log.jsonl`。批量轮次失败、缺失预期路径或调用禁用工具都会以非零状态结束相应命令。
 
 ## 输出渲染
 

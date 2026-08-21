@@ -20,6 +20,19 @@ JOIN players p ON p.team_id = r.team_id AND p.jersey_number = r.jersey_number
 WHERE p.deleted_at IS NULL
 ORDER BY p.team_id, p.jersey_number;
 
+-- name: GetPlayersByName :many
+SELECT id::text, team_id::text, jersey_number, name, batting_flags, throwing_flags, position_flags, active, created_at, updated_at, deleted_at
+FROM players
+WHERE name = $1 AND deleted_at IS NULL
+  AND (sqlc.narg(team_id)::uuid IS NULL OR team_id = sqlc.narg(team_id)::uuid)
+ORDER BY created_at, id;
+
+-- name: GetPlayersByIDs :many
+SELECT id::text, team_id::text, jersey_number, name, batting_flags, throwing_flags, position_flags, active, created_at, updated_at, deleted_at
+FROM players
+WHERE id = ANY(sqlc.arg(ids)::uuid[]) AND deleted_at IS NULL
+ORDER BY created_at, id;
+
 -- name: UpdatePlayer :execrows
 UPDATE players
 SET jersey_number = $1,

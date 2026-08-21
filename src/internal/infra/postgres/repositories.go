@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/naifenmizuha/basetion/src/internal/domain/game"
 	"github.com/naifenmizuha/basetion/src/internal/domain/player"
 	"github.com/naifenmizuha/basetion/src/internal/domain/team"
+	"github.com/naifenmizuha/basetion/src/internal/domain/training"
 	"github.com/naifenmizuha/basetion/src/internal/infra/postgres/sqlcgen"
 	"time"
 )
@@ -36,6 +39,21 @@ func (r *TeamRepository) GetByNames(ctx context.Context, names []string) ([]team
 			return nil, restoreErr
 		}
 		result = append(result, value)
+	}
+	return result, nil
+}
+func (r *TeamRepository) GetByIDs(ctx context.Context, ids []team.ID) (map[team.ID]string, error) {
+	encoded := make([]string, 0, len(ids))
+	for _, id := range ids {
+		encoded = append(encoded, string(id))
+	}
+	rows, err := r.queries.GetTeamsByIDs(ctx, encoded)
+	if err != nil {
+		return nil, fmt.Errorf("get teams by ids: %w", err)
+	}
+	result := make(map[team.ID]string, len(rows))
+	for _, row := range rows {
+		result[team.ID(row.ID)] = row.Name
 	}
 	return result, nil
 }
@@ -105,6 +123,86 @@ func (r *PlayerRepository) GetByTeamAndJerseys(ctx context.Context, keys []game.
 	rows, err := r.queries.GetPlayersByTeamAndJerseys(ctx, encoded)
 	if err != nil {
 		return nil, fmt.Errorf("get players by team and jerseys: %w", err)
+	}
+	result := make([]player.Player, 0, len(rows))
+	for _, row := range rows {
+		value, restoreErr := player.RestoreDeleted(player.ID(row.ID), team.ID(row.TeamID), int(row.JerseyNumber), row.Name, player.HandFlags(row.BattingFlags), player.HandFlags(row.ThrowingFlags), player.PositionFlags(row.PositionFlags), row.Active, requiredTimestamp(row.CreatedAt), requiredTimestamp(row.UpdatedAt), timestampTime(row.DeletedAt))
+		if restoreErr != nil {
+			return nil, restoreErr
+		}
+		result = append(result, value)
+	}
+	return result, nil
+}
+
+func (r *PlayerRepository) ListByNameWithTeam(ctx context.Context, playerName, teamName string) ([]training.PlayerWithTeam, error) {
+	teamID := pgtype.UUID{}
+	if teamName != "" {
+		teams, err := r.queries.GetTeamsByNames(ctx, []string{teamName})
+		if err != nil {
+			return nil, fmt.Errorf("resolve team by name: %w", err)
+		}
+		if len(teams) == 0 {
+			return nil, fmt.Errorf("%w: team %s", training.ErrPlayerNotFound, teamName)
+		}
+		teamID = pgtype.UUID{Bytes: uuid.MustParse(teams[0].ID), Valid: true}
+	}
+	rows, err := r.queries.GetPlayersByName(ctx, sqlcgen.GetPlayersByNameParams{Name: playerName, TeamID: teamID})
+	if err != nil {
+		return nil, fmt.Errorf("get players by name: %w", err)
+	}
+	teamIDs := make([]string, 0, len(rows))
+	seen := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		if _, ok := seen[row.TeamID]; ok {
+			continue
+		}
+		seen[row.TeamID] = struct{}{}
+		teamIDs = append(teamIDs, row.TeamID)
+	}
+	teamNames := make(map[string]string, len(teamIDs))
+	if len(teamIDs) > 0 {
+		teamRows, err := r.queries.GetTeamsByIDs(ctx, teamIDs)
+		if err != nil {
+			return nil, fmt.Errorf("get teams by ids: %w", err)
+		}
+		for _, row := range teamRows {
+			teamNames[row.ID] = row.Name
+		}
+	}
+	result := make([]training.PlayerWithTeam, 0, len(rows))
+	for _, row := range rows {
+		value, restoreErr := player.RestoreDeleted(player.ID(row.ID), team.ID(row.TeamID), int(row.JerseyNumber), row.Name, player.HandFlags(row.BattingFlags), player.HandFlags(row.ThrowingFlags), player.PositionFlags(row.PositionFlags), row.Active, requiredTimestamp(row.CreatedAt), requiredTimestamp(row.UpdatedAt), timestampTime(row.DeletedAt))
+		if restoreErr != nil {
+			return nil, restoreErr
+		}
+		result = append(result, training.PlayerWithTeam{Player: value, TeamName: teamNames[row.TeamID]})
+	}
+	return result, nil
+}
+func (r *PlayerRepository) ListByName(ctx context.Context, playerName string) ([]player.Player, error) {
+	rows, err := r.queries.GetPlayersByName(ctx, sqlcgen.GetPlayersByNameParams{Name: playerName})
+	if err != nil {
+		return nil, fmt.Errorf("get players by name: %w", err)
+	}
+	result := make([]player.Player, 0, len(rows))
+	for _, row := range rows {
+		value, restoreErr := player.RestoreDeleted(player.ID(row.ID), team.ID(row.TeamID), int(row.JerseyNumber), row.Name, player.HandFlags(row.BattingFlags), player.HandFlags(row.ThrowingFlags), player.PositionFlags(row.PositionFlags), row.Active, requiredTimestamp(row.CreatedAt), requiredTimestamp(row.UpdatedAt), timestampTime(row.DeletedAt))
+		if restoreErr != nil {
+			return nil, restoreErr
+		}
+		result = append(result, value)
+	}
+	return result, nil
+}
+func (r *PlayerRepository) GetByIDs(ctx context.Context, ids []player.ID) ([]player.Player, error) {
+	encoded := make([]string, 0, len(ids))
+	for _, id := range ids {
+		encoded = append(encoded, string(id))
+	}
+	rows, err := r.queries.GetPlayersByIDs(ctx, encoded)
+	if err != nil {
+		return nil, fmt.Errorf("get players by ids: %w", err)
 	}
 	result := make([]player.Player, 0, len(rows))
 	for _, row := range rows {

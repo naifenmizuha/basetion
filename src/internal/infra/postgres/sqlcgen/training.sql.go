@@ -130,6 +130,69 @@ func (q *Queries) ListTrainingRecords(ctx context.Context, arg ListTrainingRecor
 	return items, nil
 }
 
+const listTrainingRecordsByPlayers = `-- name: ListTrainingRecordsByPlayers :many
+SELECT id::text, player_id::text, training_date, content, reflection, created_at, updated_at, deleted_at
+FROM training_records
+WHERE deleted_at IS NULL
+  AND (COALESCE(cardinality($1::uuid[]),0)=0 OR player_id = ANY($1::uuid[]))
+  AND ($2::date IS NULL OR training_date >= $2::date)
+  AND ($3::date IS NULL OR training_date <= $3::date)
+ORDER BY training_date DESC, player_id, id
+LIMIT $4
+`
+
+type ListTrainingRecordsByPlayersParams struct {
+	PlayerIds []string
+	DateFrom  pgtype.Date
+	DateTo    pgtype.Date
+	LimitRows int32
+}
+
+type ListTrainingRecordsByPlayersRow struct {
+	ID           string
+	PlayerID     string
+	TrainingDate pgtype.Date
+	Content      string
+	Reflection   string
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+	DeletedAt    pgtype.Timestamptz
+}
+
+func (q *Queries) ListTrainingRecordsByPlayers(ctx context.Context, arg ListTrainingRecordsByPlayersParams) ([]ListTrainingRecordsByPlayersRow, error) {
+	rows, err := q.db.Query(ctx, listTrainingRecordsByPlayers,
+		arg.PlayerIds,
+		arg.DateFrom,
+		arg.DateTo,
+		arg.LimitRows,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTrainingRecordsByPlayersRow{}
+	for rows.Next() {
+		var i ListTrainingRecordsByPlayersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PlayerID,
+			&i.TrainingDate,
+			&i.Content,
+			&i.Reflection,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const softDeleteTrainingRecordsByPlayer = `-- name: SoftDeleteTrainingRecordsByPlayer :exec
 UPDATE training_records
 SET deleted_at = $1,

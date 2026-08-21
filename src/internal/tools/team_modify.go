@@ -44,7 +44,7 @@ type GameModifier interface {
 	DeleteLineup(context.Context, game.MatchID, team.ID, game.LineupKind, uint16) error
 }
 type TrainingModifier interface {
-	Create(context.Context, training.ID, player.ID, training.Date, string, string) (training.Record, error)
+	Create(context.Context, training.ID, string, string, training.Date, string, string) (training.Record, error)
 	Update(context.Context, training.ID, string, string) (training.Record, error)
 	Delete(context.Context, training.ID) error
 }
@@ -325,7 +325,7 @@ func defaultModifyOperations() map[string]modifyOperation {
 		"lineup.create":        {name: "lineup.create", group: "lineup", summary: "创建比赛阵容。", parameters: lineupFields(), resultType: "lineup"},
 		"lineup.replace":       {name: "lineup.replace", group: "lineup", summary: "替换比赛阵容。", parameters: lineupFields(), resultType: "lineup"},
 		"lineup.delete":        {name: "lineup.delete", group: "lineup", summary: "软删除比赛阵容。", parameters: lineupKeyFields(), resultType: "deleted"},
-		"training.create":      {name: "training.create", group: "training", summary: "创建球员每日自训记录。", parameters: []modifyFieldDescription{{Name: "player_id", Type: "string", Required: true, Description: "球员 ID。"}, {Name: "training_date", Type: "string", Required: true, Description: "训练日期，格式 YYYY-MM-DD。"}, {Name: "content", Type: "string", Required: true, Description: "训练内容。"}, {Name: "reflection", Type: "string", Required: false, Description: "训练感想。"}}, resultType: "training_record"},
+		"training.create":      {name: "training.create", group: "training", summary: "按球员姓名创建其每日自训记录；重名时返回同名球员的球队和背号，需补充 team_name 后重试。", parameters: []modifyFieldDescription{{Name: "player_name", Type: "string", Required: true, Description: "球员姓名，精确匹配。"}, {Name: "team_name", Type: "string", Required: false, Description: "所属球队名称；同名球员消歧时必填。"}, {Name: "training_date", Type: "string", Required: true, Description: "训练日期，格式 YYYY-MM-DD。"}, {Name: "content", Type: "string", Required: true, Description: "训练内容。"}, {Name: "reflection", Type: "string", Required: false, Description: "训练感想。"}}, invariants: []string{"同一球员每天只能有一条未删除记录。", "重名报错会列出同名球员的球队和背号，向用户确认后携 team_name 重试。"}, resultType: "training_record"},
 		"training.update":      {name: "training.update", group: "training", summary: "更新自训记录的内容与感想。", parameters: []modifyFieldDescription{{Name: "training_id", Type: "string", Required: true, Description: "自训记录 ID。"}, {Name: "content", Type: "string", Required: true, Description: "训练内容。"}, {Name: "reflection", Type: "string", Required: false, Description: "训练感想。"}}, resultType: "training_record"},
 		"training.delete":      {name: "training.delete", group: "training", summary: "软删除自训记录。", parameters: []modifyFieldDescription{{Name: "training_id", Type: "string", Required: true, Description: "自训记录 ID。"}}, resultType: "deleted"},
 	}
@@ -358,7 +358,8 @@ type playerSetActiveArguments struct {
 	Active   *bool  `json:"active"`
 }
 type trainingCreateArguments struct {
-	PlayerID     string `json:"player_id"`
+	PlayerName   string `json:"player_name"`
+	TeamName     string `json:"team_name"`
 	TrainingDate string `json:"training_date"`
 	Content      string `json:"content"`
 	Reflection   string `json:"reflection"`
@@ -446,11 +447,14 @@ func (h *teamModifyHandler) execute(ctx context.Context, operation string, argum
 		if err := decodeArguments(arguments, &input); err != nil {
 			return nil, err
 		}
+		if strings.TrimSpace(input.PlayerName) == "" {
+			return nil, errors.New("player_name is required")
+		}
 		date, err := training.ParseDate(input.TrainingDate)
 		if err != nil {
 			return nil, fmt.Errorf("parse training_date: %w", err)
 		}
-		value, err := h.training.Create(ctx, training.ID(h.newID()), player.ID(input.PlayerID), date, input.Content, input.Reflection)
+		value, err := h.training.Create(ctx, training.ID(h.newID()), input.PlayerName, input.TeamName, date, input.Content, input.Reflection)
 		if err != nil {
 			return nil, err
 		}
@@ -538,6 +542,9 @@ func validateModifyArguments(operation string, arguments map[string]any) error {
 		var input trainingCreateArguments
 		if err := decodeArguments(arguments, &input); err != nil {
 			return err
+		}
+		if strings.TrimSpace(input.PlayerName) == "" {
+			return errors.New("player_name is required")
 		}
 		if _, err := training.ParseDate(input.TrainingDate); err != nil {
 			return fmt.Errorf("parse training_date: %w", err)

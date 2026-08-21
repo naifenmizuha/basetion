@@ -72,6 +72,26 @@ func (r *TrainingRepository) List(ctx context.Context, filter training.Filter) (
 	return values, nil
 }
 
+func (r *TrainingRepository) ListByPlayers(ctx context.Context, playerIDs []player.ID, from, to *training.Date, limit int) ([]training.Record, error) {
+	encoded := make([]string, 0, len(playerIDs))
+	for _, id := range playerIDs {
+		encoded = append(encoded, string(id))
+	}
+	rows, err := r.queries.ListTrainingRecordsByPlayers(ctx, sqlcgen.ListTrainingRecordsByPlayersParams{PlayerIds: encoded, DateFrom: datePointer(from), DateTo: datePointer(to), LimitRows: int32(limit)})
+	if err != nil {
+		return nil, fmt.Errorf("list training records by players: %w", err)
+	}
+	values := make([]training.Record, 0, len(rows))
+	for _, row := range rows {
+		value, err := training.Restore(training.ID(row.ID), player.ID(row.PlayerID), training.DateFromTime(row.TrainingDate.Time), row.Content, row.Reflection, requiredTimestamp(row.CreatedAt), requiredTimestamp(row.UpdatedAt), timestampTime(row.DeletedAt))
+		if err != nil {
+			return nil, fmt.Errorf("restore training record: %w", err)
+		}
+		values = append(values, value)
+	}
+	return values, nil
+}
+
 func (r *TrainingRepository) SoftDeleteByPlayer(ctx context.Context, id player.ID, now time.Time) error {
 	err := r.queries.SoftDeleteTrainingRecordsByPlayer(ctx, sqlcgen.SoftDeleteTrainingRecordsByPlayerParams{DeletedAt: timestamptz(now), PlayerID: string(id)})
 	if err != nil {

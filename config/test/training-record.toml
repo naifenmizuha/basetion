@@ -1,0 +1,8 @@
+# 通过 `just test config/test.toml` 运行。
+# 同名数组表会在同一个测试 Session 内按声明顺序执行。
+[settings]
+max_concurrency = 2
+
+[[test.analyze]]
+prompt = "分析一下蜀汉队近三天的自训记录？看看谁在摸鱼"
+expect_tools = ["team_fetch"]

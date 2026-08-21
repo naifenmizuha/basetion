@@ -85,8 +85,8 @@ func (*teamModifyTestService) DeleteLineup(context.Context, game.MatchID, team.I
 
 type testTrainingModifier struct{}
 
-func (testTrainingModifier) Create(context.Context, training.ID, player.ID, training.Date, string, string) (training.Record, error) {
-	return training.Record{}, errors.New("not implemented")
+func (testTrainingModifier) Create(_ context.Context, id training.ID, _, _ string, date training.Date, content, reflection string) (training.Record, error) {
+	return training.New(id, "player-1", date, content, reflection, time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC))
 }
 
 func (testTrainingModifier) Update(context.Context, training.ID, string, string) (training.Record, error) {
@@ -159,6 +159,34 @@ func TestTeamModifyExecuteRejectsInvalidRequests(t *testing.T) {
 		if _, err := value.InvokableRun(context.Background(), input); err == nil {
 			t.Fatalf("invalid input accepted: %s", input)
 		}
+	}
+}
+
+func TestTeamModifyTrainingCreateByName(t *testing.T) {
+	value := newTestTeamModifyTool(t, &teamModifyTestService{})
+
+	for _, input := range []string{
+		`{"confirmed":true,"operations":[{"key":"create","operation":"training.create","arguments":{"player_name":"张三","training_date":"2026-08-01","content":"短打练习"}}]}`,
+		`{"confirmed":true,"operations":[{"key":"create","operation":"training.create","arguments":{"player_name":"张三","team_name":"蜀汉队","training_date":"2026-08-01","content":"短打练习"}}]}`,
+	} {
+		output, err := value.InvokableRun(context.Background(), input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded teamModifyOutput
+		if err := json.Unmarshal([]byte(output), &decoded); err != nil {
+			t.Fatal(err)
+		}
+		if decoded.Status != "succeeded" || len(decoded.Results) != 1 || decoded.Results[0].Status != "succeeded" {
+			t.Fatalf("output=%#v", decoded)
+		}
+	}
+
+	if _, err := value.InvokableRun(context.Background(), `{"confirmed":true,"operations":[{"key":"create","operation":"training.create","arguments":{"player_name":"","training_date":"2026-08-01","content":"短打练习"}}]}`); err == nil {
+		t.Fatal("empty player_name accepted")
+	}
+	if _, err := value.InvokableRun(context.Background(), `{"confirmed":true,"operations":[{"key":"create","operation":"training.create","arguments":{"training_date":"2026-08-01","content":"短打练习"}}]}`); err == nil {
+		t.Fatal("missing player_name accepted")
 	}
 }
 

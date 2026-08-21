@@ -3,9 +3,16 @@ package training
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/naifenmizuha/basetion/src/internal/domain/player"
+)
+
+var (
+	ErrPlayerNotFound      = errors.New("player not found by name")
+	ErrAmbiguousPlayerName = errors.New("player name matches multiple players")
 )
 
 type Repository interface {
@@ -16,9 +23,15 @@ type Repository interface {
 
 type PlayerRepository interface {
 	Get(context.Context, player.ID) (player.Player, error)
+	ListByNameWithTeam(ctx context.Context, playerName, teamName string) ([]PlayerWithTeam, error)
 }
 
 type Clock interface{ Now() time.Time }
+
+type PlayerWithTeam struct {
+	Player   player.Player
+	TeamName string
+}
 
 type Service struct {
 	repository Repository
@@ -39,11 +52,12 @@ func NewService(repository Repository, players PlayerRepository, clock Clock) (*
 	return &Service{repository: repository, players: players, clock: clock}, nil
 }
 
-func (s *Service) Create(ctx context.Context, id ID, playerID player.ID, date Date, content, reflection string) (Record, error) {
-	if _, err := s.players.Get(ctx, playerID); err != nil {
+func (s *Service) Create(ctx context.Context, id ID, playerName, teamName string, date Date, content, reflection string) (Record, error) {
+	resolved, err := s.resolvePlayer(ctx, playerName, teamName)
+	if err != nil {
 		return Record{}, err
 	}
-	value, err := New(id, playerID, date, content, reflection, s.clock.Now())
+	value, err := New(id, resolved.Player.ID(), date, content, reflection, s.clock.Now())
 	if err != nil {
 		return Record{}, err
 	}
@@ -51,6 +65,33 @@ func (s *Service) Create(ctx context.Context, id ID, playerID player.ID, date Da
 		return Record{}, err
 	}
 	return value, nil
+}
+
+func (s *Service) resolvePlayer(ctx context.Context, playerName, teamName string) (PlayerWithTeam, error) {
+	playerName = strings.TrimSpace(playerName)
+	teamName = strings.TrimSpace(teamName)
+	if playerName == "" {
+		return PlayerWithTeam{}, errors.New("player name is required")
+	}
+	players, err := s.players.ListByNameWithTeam(ctx, playerName, teamName)
+	if err != nil {
+		return PlayerWithTeam{}, err
+	}
+	switch len(players) {
+	case 0:
+		if teamName != "" {
+			return PlayerWithTeam{}, fmt.Errorf("%w: %s is not on team %s", ErrPlayerNotFound, playerName, teamName)
+		}
+		return PlayerWithTeam{}, fmt.Errorf("%w: %s", ErrPlayerNotFound, playerName)
+	case 1:
+		return players[0], nil
+	default:
+		labels := make([]string, 0, len(players))
+		for _, candidate := range players {
+			labels = append(labels, fmt.Sprintf("%s（%s #%d）", candidate.Player.Name(), candidate.TeamName, candidate.Player.JerseyNumber()))
+		}
+		return PlayerWithTeam{}, fmt.Errorf("%w: %s; specify team_name to disambiguate: %s", ErrAmbiguousPlayerName, playerName, strings.Join(labels, "、"))
+	}
 }
 
 func (s *Service) Update(ctx context.Context, id ID, content, reflection string) (Record, error) {

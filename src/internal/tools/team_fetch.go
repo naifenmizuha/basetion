@@ -12,13 +12,14 @@ import (
 	toolutils "github.com/cloudwego/eino/components/tool/utils"
 	"github.com/naifenmizuha/basetion/src/internal/domain/game"
 	"github.com/naifenmizuha/basetion/src/internal/domain/player"
+	"github.com/naifenmizuha/basetion/src/internal/domain/training"
 )
 
 const TeamFetchToolName = "team_fetch"
 
 type teamFetchInput struct {
-	Operation string         `json:"operation" jsonschema:"required,description=通过 team_describe 获得的精确读取名称"`
-	Arguments map[string]any `json:"arguments,omitempty" jsonschema:"description=比赛筛选参数 participant_names、date_from、date_to、limit"`
+	Operation string         `json:"operation" jsonschema:"required,description=读取操作的叶子名称，不带任何前缀。可用值：game.summaries、game.records、game.lineups、game.performances、training.records。先通过 team_describe 查看参数说明，再把叶子名传给本字段。"`
+	Arguments map[string]any `json:"arguments,omitempty" jsonschema:"description=读取操作各自的筛选参数，通过 team_describe 获取"`
 }
 
 type teamFetchTopic struct {
@@ -38,17 +39,31 @@ type teamFetchOutput struct {
 
 // NewTeamFetch exposes server-owned composite read models. Its discovery
 // protocol is provided by team_describe so this tool only executes reads.
-func NewTeamFetch(games *game.QueryService) (tool.InvokableTool, error) {
+func NewTeamFetch(games *game.QueryService, trainings *training.QueryService) (tool.InvokableTool, error) {
 	if games == nil {
 		return nil, errors.New("game query service is required")
 	}
+	if trainings == nil {
+		return nil, errors.New("training query service is required")
+	}
 	return toolutils.InferTool(
 		TeamFetchToolName,
-		"执行预定义的比赛组合读取。先通过 team_describe 获取摘要、完整记录、阵容或球员表现的参数说明；再用本工具取得结果。该工具不接受 Lua、SQL 或修改操作。需要自由组合球队、球员、比赛和原子 Play 时使用 team_query。",
+		"执行预定义的组合读取。先通过 team_describe 获取比赛、自训记录等读取的参数说明；再用本工具取得结果。该工具不接受 Lua、SQL 或修改操作。需要自由组合球队、球员、比赛和原子 Play 时使用 team_query。",
 		func(ctx context.Context, input teamFetchInput) (teamFetchOutput, error) {
 			op := strings.TrimSpace(input.Operation)
 			if !isFetchOperation(op) {
-				return teamFetchOutput{}, fmt.Errorf("unknown team fetch operation %q", op)
+				return teamFetchOutput{}, fmt.Errorf("unknown team fetch operation %q; available: %s", op, strings.Join(fetchOperationNames(), ", "))
+			}
+			if op == "training.records" {
+				filter, err := fetchTrainingFilter(input.Arguments)
+				if err != nil {
+					return teamFetchOutput{}, fmt.Errorf("validate team fetch arguments: %w", err)
+				}
+				values, err := trainings.ListViews(ctx, filter)
+				if err != nil {
+					return teamFetchOutput{}, fmt.Errorf("fetch %s: %w", op, err)
+				}
+				return teamFetchOutput{Operation: op, Result: fetchTrainingRecords(values)}, nil
 			}
 			filter, err := fetchMatchFilter(input.Arguments)
 			if err != nil {
@@ -65,11 +80,15 @@ func NewTeamFetch(games *game.QueryService) (tool.InvokableTool, error) {
 
 func isFetchOperation(value string) bool {
 	switch value {
-	case "game.summaries", "game.records", "game.lineups", "game.performances":
+	case "game.summaries", "game.records", "game.lineups", "game.performances", "training.records":
 		return true
 	default:
 		return false
 	}
+}
+
+func fetchOperationNames() []string {
+	return []string{"game.summaries", "game.records", "game.lineups", "game.performances", "training.records"}
 }
 
 func describeFetchTopics(requested []string) []teamFetchTopic {
@@ -79,9 +98,11 @@ func describeFetchTopics(requested []string) []teamFetchTopic {
 		"game.records":      {Name: "game.records", Kind: "operation", Found: true, Summary: "读取比赛摘要及完整 Play 记录。", Parameters: []string{"participant_names?: string[]", "date_from?: YYYY-MM-DD|RFC3339", "date_to?: YYYY-MM-DD|RFC3339", "limit?: 1..500"}},
 		"game.lineups":      {Name: "game.lineups", Kind: "operation", Found: true, Summary: "读取比赛阵容。", Parameters: []string{"participant_names?: string[]", "date_from?: YYYY-MM-DD|RFC3339", "date_to?: YYYY-MM-DD|RFC3339", "limit?: 1..500"}},
 		"game.performances": {Name: "game.performances", Kind: "operation", Found: true, Summary: "按既有领域规则计算逐场球员表现。", Parameters: []string{"participant_names?: string[]", "date_from?: YYYY-MM-DD|RFC3339", "date_to?: YYYY-MM-DD|RFC3339", "limit?: 1..500"}},
+		"training":          {Name: "training", Kind: "module", Found: true, Summary: "服务端组合的自训记录读取。", Children: []string{"training.records"}},
+		"training.records":  {Name: "training.records", Kind: "operation", Found: true, Summary: "按球员姓名或日期范围读取自训记录；同名球员的记录全部返回。", Parameters: []string{"player_name?: string（精确匹配，同名全返回）", "date_from?: YYYY-MM-DD", "date_to?: YYYY-MM-DD", "limit?: 1..500"}},
 	}
 	if len(requested) == 0 {
-		return []teamFetchTopic{all["game"]}
+		return []teamFetchTopic{all["game"], all["training"]}
 	}
 	result := make([]teamFetchTopic, 0, len(requested))
 	seen := make(map[string]struct{}, len(requested))
@@ -177,6 +198,59 @@ func parseFetchTime(value string, end bool) (time.Time, error) {
 	return parsed, nil
 }
 
+func fetchTrainingFilter(arguments map[string]any) (training.Filter, error) {
+	filter := training.Filter{Limit: 100}
+	if arguments == nil {
+		return filter, nil
+	}
+	for key := range arguments {
+		switch key {
+		case "player_name", "date_from", "date_to", "limit":
+		default:
+			return filter, fmt.Errorf("unknown argument %q", key)
+		}
+	}
+	if raw, exists := arguments["player_name"]; exists {
+		value, ok := raw.(string)
+		if !ok || strings.TrimSpace(value) == "" {
+			return filter, errors.New("player_name must be a non-empty string")
+		}
+		filter.PlayerName = strings.TrimSpace(value)
+	}
+	for _, definition := range []struct {
+		key string
+		set func(training.Date)
+	}{
+		{key: "date_from", set: func(value training.Date) { filter.From = &value }},
+		{key: "date_to", set: func(value training.Date) { filter.To = &value }},
+	} {
+		raw, exists := arguments[definition.key]
+		if !exists {
+			continue
+		}
+		text, ok := raw.(string)
+		if !ok {
+			return filter, fmt.Errorf("%s must be string", definition.key)
+		}
+		value, err := training.ParseDate(text)
+		if err != nil {
+			return filter, fmt.Errorf("invalid %s: %w", definition.key, err)
+		}
+		definition.set(value)
+	}
+	if raw, exists := arguments["limit"]; exists {
+		value, ok := raw.(float64)
+		if !ok || value != math.Trunc(value) || value < 1 || value > 500 {
+			return filter, errors.New("limit must be an integer from 1 to 500")
+		}
+		filter.Limit = int(value)
+	}
+	if filter.From != nil && filter.To != nil && filter.From.After(*filter.To) {
+		return filter, errors.New("date range is invalid")
+	}
+	return filter, nil
+}
+
 func fetchGame(ctx context.Context, service *game.QueryService, operation string, filter game.MatchFilter) (any, error) {
 	switch operation {
 	case "game.summaries":
@@ -262,6 +336,13 @@ func fetchPerformances(values []game.MatchPlayerPerformanceView) []any {
 			fielding = append(fielding, map[string]any{"player": fetchIdentity(line.Player), "putouts": line.Putouts, "assists": line.Assists, "errors": line.Errors})
 		}
 		result = append(result, map[string]any{"match": fetchMatch(value.Match), "offense": offense, "pitching": pitching, "fielding": fielding, "limits": map[string]any{"fielding_opportunities_unavailable": value.Limits.FieldingOpportunitiesUnavailable, "earned_runs_require_explicit_mark": value.Limits.EarnedRunsRequireExplicitMark, "unrecorded_pitch_facts_excluded": value.Limits.UnrecordedPitchFactsExcluded}})
+	}
+	return result
+}
+func fetchTrainingRecords(values []training.RecordView) []any {
+	result := make([]any, 0, len(values))
+	for _, value := range values {
+		result = append(result, map[string]any{"player_name": value.PlayerName, "team_name": value.TeamName, "training_date": value.TrainingDate.String(), "content": value.Content, "reflection": value.Reflection})
 	}
 	return result
 }

@@ -9,6 +9,7 @@ import (
 	toolutils "github.com/cloudwego/eino/components/tool/utils"
 	"github.com/naifenmizuha/basetion/src/internal/domain/game"
 	domain "github.com/naifenmizuha/basetion/src/internal/domain/teamquery"
+	"github.com/naifenmizuha/basetion/src/internal/domain/training"
 )
 
 const TeamDescribeToolName = "team_describe"
@@ -49,12 +50,15 @@ type teamDescribeHandler struct {
 // NewTeamTools builds the complete model-visible team protocol. The describe
 // and modify tools share one operation catalog so their contracts cannot
 // drift apart.
-func NewTeamTools(query *domain.Service, games *game.QueryService, teams TeamModifier, players PlayerModifier, gameModifier GameModifier, training TrainingModifier, options ...TeamModifyOption) ([]tool.InvokableTool, error) {
+func NewTeamTools(query *domain.Service, games *game.QueryService, trainings *training.QueryService, teams TeamModifier, players PlayerModifier, gameModifier GameModifier, training TrainingModifier, options ...TeamModifyOption) ([]tool.InvokableTool, error) {
 	if query == nil {
 		return nil, errors.New("team query service is required")
 	}
 	if games == nil {
 		return nil, errors.New("game query service is required")
+	}
+	if trainings == nil {
+		return nil, errors.New("training query service is required")
 	}
 	modifyHandler, err := newTeamModifyHandler(teams, players, gameModifier, training, options...)
 	if err != nil {
@@ -64,7 +68,7 @@ func NewTeamTools(query *domain.Service, games *game.QueryService, teams TeamMod
 	if err != nil {
 		return nil, err
 	}
-	fetchTool, err := NewTeamFetch(games)
+	fetchTool, err := NewTeamFetch(games, trainings)
 	if err != nil {
 		return nil, err
 	}

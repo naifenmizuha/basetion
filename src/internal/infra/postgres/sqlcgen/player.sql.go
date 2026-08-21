@@ -161,6 +161,118 @@ func (q *Queries) GetPlayer(ctx context.Context, id string) (GetPlayerRow, error
 	return i, err
 }
 
+const getPlayersByIDs = `-- name: GetPlayersByIDs :many
+SELECT id::text, team_id::text, jersey_number, name, batting_flags, throwing_flags, position_flags, active, created_at, updated_at, deleted_at
+FROM players
+WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL
+ORDER BY created_at, id
+`
+
+type GetPlayersByIDsRow struct {
+	ID            string
+	TeamID        string
+	JerseyNumber  int16
+	Name          string
+	BattingFlags  int16
+	ThrowingFlags int16
+	PositionFlags int16
+	Active        bool
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+	DeletedAt     pgtype.Timestamptz
+}
+
+func (q *Queries) GetPlayersByIDs(ctx context.Context, ids []string) ([]GetPlayersByIDsRow, error) {
+	rows, err := q.db.Query(ctx, getPlayersByIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetPlayersByIDsRow{}
+	for rows.Next() {
+		var i GetPlayersByIDsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TeamID,
+			&i.JerseyNumber,
+			&i.Name,
+			&i.BattingFlags,
+			&i.ThrowingFlags,
+			&i.PositionFlags,
+			&i.Active,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getPlayersByName = `-- name: GetPlayersByName :many
+SELECT id::text, team_id::text, jersey_number, name, batting_flags, throwing_flags, position_flags, active, created_at, updated_at, deleted_at
+FROM players
+WHERE name = $1 AND deleted_at IS NULL
+  AND ($2::uuid IS NULL OR team_id = $2::uuid)
+ORDER BY created_at, id
+`
+
+type GetPlayersByNameParams struct {
+	Name   string
+	TeamID pgtype.UUID
+}
+
+type GetPlayersByNameRow struct {
+	ID            string
+	TeamID        string
+	JerseyNumber  int16
+	Name          string
+	BattingFlags  int16
+	ThrowingFlags int16
+	PositionFlags int16
+	Active        bool
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+	DeletedAt     pgtype.Timestamptz
+}
+
+func (q *Queries) GetPlayersByName(ctx context.Context, arg GetPlayersByNameParams) ([]GetPlayersByNameRow, error) {
+	rows, err := q.db.Query(ctx, getPlayersByName, arg.Name, arg.TeamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetPlayersByNameRow{}
+	for rows.Next() {
+		var i GetPlayersByNameRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TeamID,
+			&i.JerseyNumber,
+			&i.Name,
+			&i.BattingFlags,
+			&i.ThrowingFlags,
+			&i.PositionFlags,
+			&i.Active,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getPlayersByTeamAndJerseys = `-- name: GetPlayersByTeamAndJerseys :many
 WITH requested AS (
     SELECT

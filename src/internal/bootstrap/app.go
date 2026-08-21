@@ -93,7 +93,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 		fmt.Fprintf(stderr, "初始化比赛读取服务失败: %v\n", err)
 		return 1
 	}
-	trainingReadService, err := training.NewQueryService(database.Training())
+	trainingReadService, err := training.NewQueryService(database.Training(), training.WithPlayerReader(database.Players()), training.WithTeamReader(database.Teams()))
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化自训记录读取服务失败: %v\n", err)
 		return 1
@@ -129,7 +129,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 		fmt.Fprintf(stderr, "初始化自训记录写入服务失败: %v\n", err)
 		return 1
 	}
-	teamTools, err := basetiontools.NewTeamTools(teamQueryService, gameReadService, teamService, playerService, gameService, trainingService)
+	teamTools, err := basetiontools.NewTeamTools(teamQueryService, gameReadService, trainingReadService, teamService, playerService, gameService, trainingService)
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化球队工具失败: %v\n", err)
 		return 1

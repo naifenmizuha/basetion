@@ -16,7 +16,7 @@ import (
 	"golang.org/x/term"
 )
 
-const usage = "用法: basetion [--profile run|dev] [--session-id <ID>] <提示词>\n       basetion [--profile run|dev] test --input <cases.toml> [--output <results.jsonl>] [--max-concurrency 4]"
+const usage = "用法: basetion [--profile run|dev] [--session-id <ID>] <提示词>\n       basetion [--profile run|dev] test --input <cases.toml> [--output <results.jsonl>]"
 
 const (
 	ProfileRun = "run"
