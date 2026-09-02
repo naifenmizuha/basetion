@@ -49,7 +49,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 		return 2
 	}
 	defer logFile.Close()
-	logger := log.New(logFile, "basetion ", log.LstdFlags)
+	logger := log.New(io.MultiWriter(logFile, stderr), "basetion ", log.LstdFlags)
 	diagnosticFields := cfg.DiagnosticFields()
 	diagnosticFields["profile"] = profile
 	logger.Printf("启动配置: %v", diagnosticFields)
@@ -129,14 +129,19 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 		fmt.Fprintf(stderr, "初始化自训记录写入服务失败: %v\n", err)
 		return 1
 	}
-	teamTools, err := basetiontools.NewTeamTools(teamQueryService, gameReadService, trainingReadService, teamService, playerService, gameService, trainingService)
-	if err != nil {
-		fmt.Fprintf(stderr, "初始化球队工具失败: %v\n", err)
-		return 1
-	}
 	agenticModel, err := harness.NewAgenticModel(ctx)
 	if err != nil {
 		fmt.Fprintf(stderr, "初始化 AgenticModel 失败: %v\n", err)
+		return 1
+	}
+	gameRecorder, err := harness.NewGameRecordingRunner(agenticModel, gameService)
+	if err != nil {
+		fmt.Fprintf(stderr, "初始化比赛录入会话失败: %v\n", err)
+		return 1
+	}
+	teamTools, err := basetiontools.NewTeamTools(teamQueryService, gameReadService, trainingReadService, teamService, playerService, gameService, trainingService, gameRecorder)
+	if err != nil {
+		fmt.Fprintf(stderr, "初始化球队工具失败: %v\n", err)
 		return 1
 	}
 	businessTools := make([]tool.BaseTool, 0, len(teamTools))
@@ -153,6 +158,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) (exit
 		fmt.Fprintf(stderr, "初始化会话服务失败: %v\n", err)
 		return 1
 	}
+	conversationService.WithTurnScope(harness.NewGameRecordingTurnScope())
 	return cli.Execute(ctx, args, conversationService, stdout, stderr)
 }
 

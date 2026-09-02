@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "psycopg[binary]==3.2.10",
+# ]
+# ///
 """Rebuild the fixed development PostgreSQL database from repository SQL."""
 
 from __future__ import annotations
 
 import argparse
 import sys
+import tomllib
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 try:
     import psycopg
     from psycopg import sql
-    import tomli
 except ModuleNotFoundError as error:
     missing = error.name
     raise SystemExit(
-        f"缺少 Python 依赖 {missing!r}；请先执行 `python3 -m pip install -r scripts/requirements.txt`"
+        f"缺少 Python 依赖 {missing!r}；请通过 `uv run --script scripts/manage_dev_db.py` 运行"
     ) from error
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,7 +34,7 @@ def development_database_url() -> str:
     if not CONFIG_FILE.is_file():
         raise RuntimeError(f"找不到数据库配置文件: {CONFIG_FILE}")
     with CONFIG_FILE.open("rb") as config_file:
-        config = tomli.load(config_file)
+        config = tomllib.load(config_file)
     try:
         database_url = config["database"]["dev"]["url"]
     except KeyError as error:

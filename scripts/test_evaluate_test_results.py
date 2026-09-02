@@ -75,6 +75,17 @@ class EvaluateTestResultsTest(unittest.TestCase):
         self.assertEqual(["team_query"], turn["observed_tools"])
         self.assertEqual(["manage-team"], turn["observed_skills"])
 
+    def test_accepts_go_rfc3339_nanosecond_timestamps(self) -> None:
+        report = evaluate_file(
+            self.write_records(
+                record(
+                    started_at="2026-09-01T13:53:27.110715878Z",
+                    finished_at="2026-09-01T13:53:28.111715879Z",
+                )
+            )
+        )
+        self.assertEqual(1001, report["turns"][0]["duration_ms"])
+
     def test_reports_failed_missing_and_forbidden_path_violations(self) -> None:
         value = record(
             status="failed",

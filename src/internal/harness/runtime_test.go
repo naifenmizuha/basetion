@@ -187,7 +187,7 @@ func TestRuntimeLoadsProjectKnowledgeSkill(t *testing.T) {
 	if !strings.Contains(systemText, "你是 Basetion") || !strings.Contains(systemText, "必须等待 Skill 结果返回后") || len(systemText) <= len(defaultInstruction) {
 		t.Fatalf("system instruction does not include the base and Skill middleware prompts: %q", systemText)
 	}
-	if strings.Contains(logs.String(), "Basetion 是什么") || strings.Contains(logs.String(), "六个职责区域") {
+	if strings.Contains(logs.String(), "Basetion 是什么") {
 		t.Fatalf("safe callbacks leaked payloads: %s", logs.String())
 	}
 }
@@ -291,5 +291,13 @@ func TestUnsafeCallbackCanIncludePayload(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "debug-payload") {
 		t.Fatalf("unsafe callback did not include payload: %s", logs.String())
+	}
+}
+
+func TestToolLogPreviewTruncatesLongValues(t *testing.T) {
+	long := strings.Repeat("界", maxToolLogPreviewRunes+1)
+	preview := toolLogPreview("team_describe", long)
+	if !strings.Contains(preview, "truncated; original_runes=") || len([]rune(preview)) <= maxToolLogPreviewRunes {
+		t.Fatalf("long preview=%q", preview)
 	}
 }

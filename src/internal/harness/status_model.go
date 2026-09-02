@@ -80,6 +80,9 @@ func (m *statusModel) withStatus(ctx context.Context, input []*schema.AgenticMes
 		usedContext,
 		m.contextWindowTokens,
 	)
+	// Keep the native tool-call/result pairing intact. Game recording depends on
+	// those receipts to continue an isolated multi-step intake; converting them
+	// into user text makes the model mistake its own progress for a new request.
 	withStatus := make([]*schema.AgenticMessage, 0, len(input)+1)
 	withStatus = append(withStatus, input...)
 	return append(withStatus, schema.UserAgenticMessage(status)), status

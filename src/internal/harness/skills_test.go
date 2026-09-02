@@ -100,7 +100,7 @@ func TestRepositorySkillsContainRequiredGuidance(t *testing.T) {
 		"query-team-data":   {"team_describe", "fetch.game.summaries", "query.player.list", "team_fetch", "team_query", "Few-shot", "main(data)", "game.plays", "最小 table"},
 		"manage-roster":     {"team_describe", "modify.team.create", "team_modify", "player.change_jersey", "Few-shot", `"operations"`, "stopped"},
 		"manage-game-setup": {"team_describe", "modify.match.set_status", "team_modify", "lineup.create", "Few-shot", "record-game", "operations", "软删除"},
-		"record-game":       {"team_describe", "modify.game.create", "team_modify", "few-shot", "operations", "from_base=0", "牺牲飞球", "阳春本垒打"},
+		"record-game":       {"team_game_create", "record", "confirmed", "from_base=0", "牺牲飞球", "阳春本垒打"},
 		"manage-training":   {"team_describe", "modify.training.create", "team_modify", "training.update", "Few-shot", `"operations"`, "软删除"},
 	}
 	for name, phrases := range checks {

@@ -13,4 +13,4 @@
 
 `bootstrap.Execute` 提取 `--profile run|dev`，初始化配置后按 `log.file` 创建父目录并以追加方式打开 0640 日志文件；该步骤失败按配置错误退出。启动配置、Harness 生命周期和对话轮次汇总写入此文件，CLI 的用户可见错误仍写入 stderr。随后它初始化 Eino 中文语言，连接选定 profile 的 PostgreSQL，并组装文件 Session 存储、球队/球员/比赛/训练领域服务、Lua Team Query Executor、Team Describe/Fetch/Query/Modify 工具、模型、Harness 和会话服务。比赛写服务同时接收 Store 提供的直接比赛、球队和球员 Repository 及 UUID 生成器，供 `game.create` 按名称和背号解析整场记录；Player 查询服务从 PostgreSQL 的姓名化 Reader 构造；Game 查询服务直接使用 Store 的组合投影和按内部比赛引用批量读取 Play 的基础投影。
 
-组合根不创建数据库、执行迁移、重置数据或生成 sqlc 代码；这些动作由显式 Just 配方完成。普通入口装配 `FileStore`，检测到 CLI `test` 子命令时改装配 `MemoryStore`，其余领域服务、工具、模型和数据库 profile 保持一致。任一初始化失败都会按阶段输出错误并返回非零退出码，连接池在进程结束时关闭。
+组合根不创建数据库、执行迁移、重置数据或生成 sqlc 代码；这些动作由显式 Just 配方完成。它先创建 AgenticModel 和内部比赛 Runner，再把 Runner 注入外层 `team_game_create`，并为会话服务安装比赛录入 TurnScope。普通入口装配 `FileStore`，检测到 CLI `test` 子命令时改装配 `MemoryStore`，其余领域服务、工具、模型和数据库 profile 保持一致。日志同时写入配置的日志文件和终端 stderr。任一初始化失败都会按阶段输出错误并返回非零退出码，连接池在进程结束时关闭。

@@ -19,9 +19,11 @@
 3. 将本轮用户消息追加到历史副本，并调用 typed Eino Runner。
 4. 向调用方转发 AgentEvent，同时从流式消息副本收集待持久化消息。
 5. 遇到 Runner 错误、流合并错误或 Context 取消时停止，不覆盖旧快照。
-6. 正常结束后更新时间并保存完整消息历史。
+6. 正常结束后更新时间并保存消息历史；`team_game_create` 的调用与结果块在保存前移除，内部 Play 与 intake 从未进入外层历史。
 
 `Service` 可接收 `TurnTelemetry` 端口。每个通过 ID 和提示词校验的轮次先以相同 Context 开始遥测，再运行 Runner；无论加载、执行、取消或保存在哪个阶段结束，都会传递最终错误给遥测端口。该端口不读取或修改消息，因此状态栏和运行指标不会写入 Session。
+
+可选的 `TurnScope` 为一次 Runner 执行建立短生命周期资源；实现了 `TurnMessageScope` 的 scope 会在 Runner 启动前取得该轮完整输入。比赛录入用它将只含用户文本的快照交给嵌套会话，scope 在轮次结束时清理，不能将临时对象写入 Session。
 
 流式 `MessageStream` 通过 `Copy(2)` 分成公开消费流和内部收集流，避免入口渲染与持久化争用同一个流。
 

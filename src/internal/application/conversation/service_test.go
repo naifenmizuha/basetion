@@ -143,6 +143,16 @@ func TestServicePersistsStreamingToolLoopAndContinuesHistory(t *testing.T) {
 	}
 }
 
+func TestWithoutGameCreateMessagesDropsCompleteRecord(t *testing.T) {
+	call := &schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant, ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.FunctionToolCall{CallID: "create", Name: "team_game_create", Arguments: `{"record":{"secret":"must-not-persist"}}`})}}
+	result := &schema.AgenticMessage{Role: schema.AgenticRoleTypeUser, ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.FunctionToolResult{CallID: "create", Name: "team_game_create"})}}
+	kept := &schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant, ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.AssistantGenText{Text: "已完成录入"})}}
+	persisted := withoutGameCreateMessages([]*schema.AgenticMessage{schema.UserAgenticMessage("录入"), call, result, kept})
+	if len(persisted) != 2 || persisted[0].ContentBlocks[0].UserInputText.Text != "录入" || persisted[1].ContentBlocks[0].AssistantGenText.Text != "已完成录入" {
+		t.Fatalf("persisted=%#v", persisted)
+	}
+}
+
 func TestServiceDoesNotCommitFailedOrCancelledTurn(t *testing.T) {
 	store := newMemoryStore()
 	store.sessions["s1"] = Session{ID: "s1", Messages: []*schema.AgenticMessage{schema.UserAgenticMessage("old")}}

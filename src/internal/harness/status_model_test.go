@@ -111,6 +111,32 @@ func TestStatusModelAppendsUserStatusAfterToolResult(t *testing.T) {
 	}
 }
 
+func TestStatusModelRetainsNativeGameToolPairing(t *testing.T) {
+	base := &scriptedAgenticModel{responses: [][]*schema.AgenticMessage{{{Role: schema.AgenticRoleTypeAssistant}}}}
+	decorated := newStatusModel(base, "测试用户", 128000, time.Now)
+	call := &schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant, ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.FunctionToolCall{CallID: "create", Name: "team_game_create", Arguments: `{"confirmed":true,"record":{"secret":"very-secret"}}`})}}
+	result := &schema.AgenticMessage{
+		Role: schema.AgenticRoleTypeUser,
+		ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.FunctionToolResult{
+			CallID: "create", Name: "team_game_create",
+			Content: []*schema.FunctionToolResultContentBlock{{
+				Type: schema.FunctionToolResultContentBlockTypeText,
+				Text: &schema.UserInputText{Text: `{"status":"succeeded","progress":{"completed_plays":1}}`},
+			}},
+		})},
+	}
+	stream, err := decorated.Stream(context.Background(), []*schema.AgenticMessage{schema.UserAgenticMessage("录入"), call, result})
+	consumeAgenticStream(t, mustStream(t, stream, err))
+	base.mu.Lock()
+	defer base.mu.Unlock()
+	if len(base.inputs) != 1 {
+		t.Fatalf("inputs=%#v", base.inputs)
+	}
+	if base.inputs[0][1] != call || base.inputs[0][2] != result {
+		t.Fatalf("tool call/result pairing was rewritten: %#v", base.inputs[0])
+	}
+}
+
 func TestTurnTelemetrySummarizesAllModelAndToolUsage(t *testing.T) {
 	var logs bytes.Buffer
 	telemetry := NewTurnTelemetry(log.New(&logs, "", 0))

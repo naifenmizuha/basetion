@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -205,32 +204,4 @@ func TestTeamModifyExecuteStopsBatchAndRetainsGameCreateProgress(t *testing.T) {
 		t.Fatalf("stopped output=%#v", stopped)
 	}
 
-	const gameInput = `{"confirmed":true,"operations":[{"key":"record-game","operation":"game.create","arguments":{"home_team_name":"主队","away_team_name":"客队","scheduled_at":"2026-09-01T19:00:00+08:00","location":"主场","home_lineup":{"name":"主队首发","entries":[{"jersey_number":1,"batting_order":1,"position":"pitcher"}]},"away_lineup":{"name":"客队首发","entries":[{"jersey_number":2,"batting_order":1,"position":"first_base"}]},"plays":[{"inning":1,"half":"top","batting_order":1,"batter_jersey_number":2,"pitcher_jersey_number":1,"batting_result":"strikeout","result_description":"三振","pitches":[{"result":"swinging_strike"}]}]}}]}`
-	service = &teamModifyTestService{gameProgress: game.GameCreateProgress{Status: "succeeded", HomeTeamName: "主队", AwayTeamName: "客队", MatchCreated: true, CompletedLineups: 2, CompletedPlays: 4}}
-	value = newTestTeamModifyTool(t, service)
-	output, err = value.InvokableRun(context.Background(), gameInput)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var succeeded teamModifyOutput
-	if err := json.Unmarshal([]byte(output), &succeeded); err != nil {
-		t.Fatal(err)
-	}
-	if succeeded.Status != "succeeded" || len(succeeded.Results) != 1 || succeeded.Results[0].Status != "succeeded" || succeeded.ContextReceipt == nil || succeeded.ContextReceipt.Operation != "game.create" {
-		t.Fatalf("succeeded output=%#v", succeeded)
-	}
-
-	service = &teamModifyTestService{gameProgress: game.GameCreateProgress{Status: "partial", Error: "write play failed", MatchCreated: true, CompletedLineups: 2, CompletedPlays: 4}}
-	value = newTestTeamModifyTool(t, service)
-	output, err = value.InvokableRun(context.Background(), gameInput)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var partial teamModifyOutput
-	if err := json.Unmarshal([]byte(output), &partial); err != nil {
-		t.Fatal(err)
-	}
-	if partial.Status != "stopped" || partial.StoppedAt == nil || partial.Results[0].Status != "failed" || !strings.Contains(partial.Results[0].Error, "write play failed") {
-		t.Fatalf("partial output=%#v", partial)
-	}
 }

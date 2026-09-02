@@ -50,7 +50,7 @@ type teamDescribeHandler struct {
 // NewTeamTools builds the complete model-visible team protocol. The describe
 // and modify tools share one operation catalog so their contracts cannot
 // drift apart.
-func NewTeamTools(query *domain.Service, games *game.QueryService, trainings *training.QueryService, teams TeamModifier, players PlayerModifier, gameModifier GameModifier, training TrainingModifier, options ...TeamModifyOption) ([]tool.InvokableTool, error) {
+func NewTeamTools(query *domain.Service, games *game.QueryService, trainings *training.QueryService, teams TeamModifier, players PlayerModifier, gameModifier GameModifier, training TrainingModifier, gameRecorder GameRecordingRunner, options ...TeamModifyOption) ([]tool.InvokableTool, error) {
 	if query == nil {
 		return nil, errors.New("team query service is required")
 	}
@@ -80,13 +80,17 @@ func NewTeamTools(query *domain.Service, games *game.QueryService, trainings *tr
 	if err != nil {
 		return nil, err
 	}
-	return []tool.InvokableTool{describeTool, fetchTool, queryTool, modifyTool}, nil
+	gameCreateTool, err := newTeamGameCreateTool(gameRecorder)
+	if err != nil {
+		return nil, err
+	}
+	return []tool.InvokableTool{describeTool, fetchTool, queryTool, modifyTool, gameCreateTool}, nil
 }
 
 func newTeamDescribeTool(handler *teamDescribeHandler) (tool.InvokableTool, error) {
 	return toolutils.InferTool(
 		TeamDescribeToolName,
-		"按需读取球队读取、Lua 查询和预定义修改的目录及精确协议。topic 使用 fetch.*、query.*、modify.* 前缀；先读取所需 topic，再调用 team_fetch、team_query 或 team_modify。此工具不读取或修改业务数据。",
+		"按需读取球队读取、Lua 查询和预定义修改的目录及精确协议。topic 使用 fetch.*、query.*、modify.* 前缀；先读取所需 topic，再调用对应工具。此工具不读取或修改业务数据。",
 		handler.invoke,
 	)
 }

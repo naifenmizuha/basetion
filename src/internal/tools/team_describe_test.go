@@ -30,7 +30,7 @@ func newTestTeamTools(t *testing.T) []tool.InvokableTool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tools, err := NewTeamTools(query, games, trainings, &teamModifyTestService{}, testPlayerModifier{}, &teamModifyTestService{}, testTrainingModifier{}, WithTeamModifyIDGenerator(func() string { return "generated-id" }))
+	tools, err := NewTeamTools(query, games, trainings, &teamModifyTestService{}, testPlayerModifier{}, &teamModifyTestService{}, testTrainingModifier{}, gameRecordingRunnerStub{}, WithTeamModifyIDGenerator(func() string { return "generated-id" }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,12 +52,12 @@ func teamToolByName(t *testing.T, values []tool.InvokableTool, name string) tool
 	return nil
 }
 
-func TestNewTeamToolsRegistersExactlyFourTools(t *testing.T) {
+func TestNewTeamToolsRegistersGameCreateTool(t *testing.T) {
 	values := newTestTeamTools(t)
-	if len(values) != 4 {
+	if len(values) != 5 {
 		t.Fatalf("tool count=%d", len(values))
 	}
-	for _, name := range []string{TeamDescribeToolName, TeamFetchToolName, TeamQueryToolName, TeamModifyToolName} {
+	for _, name := range []string{TeamDescribeToolName, TeamFetchToolName, TeamQueryToolName, TeamModifyToolName, TeamGameCreateToolName} {
 		teamToolByName(t, values, name)
 	}
 }

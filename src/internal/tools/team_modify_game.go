@@ -131,48 +131,48 @@ type legacyGameCreateArguments struct {
 // the lineup container and inning half, while the game domain derives counts
 // and situations from the event stream.
 type compactPitchArguments struct {
-	Result      string   `json:"result"`
-	PitchType   string   `json:"pitch_type"`
-	Velocity    *float64 `json:"velocity"`
-	Zone        *int     `json:"zone"`
-	Description string   `json:"description"`
+	Result      string   `json:"result" jsonschema:"required,description=逐球结果,enum=ball,enum=called_strike,enum=swinging_strike,enum=foul,enum=foul_tip,enum=in_play,enum=hit_by_pitch,enum=intentional_ball,enum=pitchout,enum=other"`
+	PitchType   string   `json:"pitch_type,omitempty" jsonschema:"description=球种；未知时省略，不传空字符串"`
+	Velocity    *float64 `json:"velocity,omitempty" jsonschema:"description=球速；未知时省略，不传 0"`
+	Zone        *int     `json:"zone,omitempty" jsonschema:"description=进垒区域；未知时省略，不传 0"`
+	Description string   `json:"description,omitempty" jsonschema:"description=补充说明；未知时省略"`
 }
 type compactRunnerArguments struct {
-	JerseyNumber               *int   `json:"jersey_number"`
-	Result                     string `json:"result"`
-	FromBase                   *int   `json:"from_base"`
-	ToBase                     *int   `json:"to_base"`
-	ChargedPitcherJerseyNumber *int   `json:"charged_pitcher_jersey_number"`
-	Earned                     *bool  `json:"earned"`
-	RBIBatterJerseyNumber      *int   `json:"rbi_batter_jersey_number"`
-	Description                string `json:"description"`
+	JerseyNumber               *int   `json:"jersey_number" jsonschema:"required,description=跑者背号"`
+	Result                     string `json:"result" jsonschema:"required,description=跑垒结果,enum=advance,enum=score,enum=force_out,enum=tag_out,enum=caught_stealing,enum=picked_off,enum=error_advance"`
+	FromBase                   *int   `json:"from_base" jsonschema:"required,description=起始垒位；打者首次上垒为 0"`
+	ToBase                     *int   `json:"to_base,omitempty" jsonschema:"description=目标垒位；未知或出局时省略"`
+	ChargedPitcherJerseyNumber *int   `json:"charged_pitcher_jersey_number,omitempty" jsonschema:"description=责任投手背号；未知时省略"`
+	Earned                     *bool  `json:"earned,omitempty" jsonschema:"description=是否自责分；未知时省略，不传 false"`
+	RBIBatterJerseyNumber      *int   `json:"rbi_batter_jersey_number,omitempty" jsonschema:"description=打点打者背号；没有时省略"`
+	Description                string `json:"description,omitempty" jsonschema:"description=补充说明；未知时省略"`
 }
 type compactFieldingArguments struct {
-	JerseyNumber *int   `json:"jersey_number"`
-	Position     string `json:"position"`
-	Result       string `json:"result"`
-	Description  string `json:"description"`
+	JerseyNumber *int   `json:"jersey_number" jsonschema:"required,description=守备员背号"`
+	Position     string `json:"position" jsonschema:"required,description=守备位置,enum=pitcher,enum=catcher,enum=first_base,enum=second_base,enum=shortstop,enum=third_base,enum=outfielder"`
+	Result       string `json:"result" jsonschema:"required,description=守备结果,enum=putout,enum=assist,enum=error,enum=double_play,enum=triple_play,enum=passed_ball,enum=catcher_interference,enum=other"`
+	Description  string `json:"description,omitempty" jsonschema:"description=补充说明；未知时省略"`
 }
 type compactPlayArguments struct {
-	Inning              *int                       `json:"inning"`
-	Half                string                     `json:"half"`
-	BattingOrder        *int                       `json:"batting_order"`
-	BatterJerseyNumber  *int                       `json:"batter_jersey_number"`
-	PitcherJerseyNumber *int                       `json:"pitcher_jersey_number"`
-	BattingResult       string                     `json:"batting_result"`
-	ResultDescription   string                     `json:"result_description"`
-	Pitches             []compactPitchArguments    `json:"pitches"`
-	RunnerOutcomes      []compactRunnerArguments   `json:"runner_outcomes"`
-	FieldingOutcomes    []compactFieldingArguments `json:"fielding_outcomes"`
+	Inning              *int                       `json:"inning" jsonschema:"required,description=局数，从 1 开始"`
+	Half                string                     `json:"half" jsonschema:"required,description=top 为客队进攻，bottom 为主队进攻,enum=top,enum=bottom"`
+	BattingOrder        *int                       `json:"batting_order" jsonschema:"required,description=本打席打者的棒次"`
+	BatterJerseyNumber  *int                       `json:"batter_jersey_number" jsonschema:"required,description=本打席打者背号"`
+	PitcherJerseyNumber *int                       `json:"pitcher_jersey_number" jsonschema:"required,description=本打席投手背号"`
+	BattingResult       string                     `json:"batting_result" jsonschema:"required,description=打席结果,enum=single,enum=double,enum=triple,enum=home_run,enum=walk,enum=intentional_walk,enum=hit_by_pitch,enum=strikeout,enum=ground_out,enum=fly_out,enum=line_out,enum=fielders_choice,enum=reached_on_error,enum=sacrifice_bunt,enum=sacrifice_fly,enum=interference,enum=other"`
+	ResultDescription   string                     `json:"result_description" jsonschema:"required,description=打席结果说明"`
+	Pitches             []compactPitchArguments    `json:"pitches" jsonschema:"required,description=按实际顺序的非空逐球数组"`
+	RunnerOutcomes      []compactRunnerArguments   `json:"runner_outcomes,omitempty" jsonschema:"description=跑垒结果；没有时省略"`
+	FieldingOutcomes    []compactFieldingArguments `json:"fielding_outcomes,omitempty" jsonschema:"description=守备结果；没有时省略"`
 }
 type compactLineupEntryArguments struct {
-	JerseyNumber *int   `json:"jersey_number"`
-	BattingOrder *int   `json:"batting_order"`
-	Position     string `json:"position"`
+	JerseyNumber *int   `json:"jersey_number" jsonschema:"required,description=首发球员背号"`
+	BattingOrder *int   `json:"batting_order" jsonschema:"required,description=首发棒次"`
+	Position     string `json:"position" jsonschema:"required,description=首发守备位置,enum=pitcher,enum=catcher,enum=first_base,enum=second_base,enum=shortstop,enum=third_base,enum=outfielder"`
 }
 type compactLineupArguments struct {
-	Name    string                        `json:"name"`
-	Entries []compactLineupEntryArguments `json:"entries"`
+	Name    string                        `json:"name" jsonschema:"required,description=阵容名称"`
+	Entries []compactLineupEntryArguments `json:"entries" jsonschema:"required,description=非空首发条目"`
 }
 type gameCreateArguments struct {
 	HomeTeamName string                 `json:"home_team_name"`
@@ -653,13 +653,6 @@ func parseLineupEntries(values []lineupEntryArguments, newID IDGenerator) ([]gam
 
 func validateGameArguments(operation string, arguments map[string]any) error {
 	switch operation {
-	case "game.create":
-		var v gameCreateArguments
-		if err := decodeArguments(arguments, &v); err != nil {
-			return err
-		}
-		_, err := convertCompactGame(v)
-		return err
 	case "match.create":
 		var v matchCreateArguments
 		if err := decodeArguments(arguments, &v); err != nil {
@@ -719,23 +712,6 @@ func validateGameArguments(operation string, arguments map[string]any) error {
 
 func (h *teamModifyHandler) executeGame(ctx context.Context, operation string, arguments map[string]any) (any, error) {
 	switch operation {
-	case "game.create":
-		var v gameCreateArguments
-		if err := decodeArguments(arguments, &v); err != nil {
-			return nil, err
-		}
-		draft, err := convertCompactGame(v)
-		if err != nil {
-			return nil, err
-		}
-		result, err := h.games.CreateCompactGameRecord(ctx, draft)
-		if err != nil {
-			return nil, err
-		}
-		if result.Status == "partial" {
-			return result, &partialModifyError{result: result, reason: result.Error}
-		}
-		return result, nil
 	case "match.create":
 		var v matchCreateArguments
 		if err := decodeArguments(arguments, &v); err != nil {

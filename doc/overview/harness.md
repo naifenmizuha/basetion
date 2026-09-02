@@ -23,17 +23,19 @@ Skill Middleware 使用 Eino Ext 本地文件 Backend，从进程当前工作目
 - `query-team-data`：只读球队、球员和比赛事实；完整比赛投影优先 `team_fetch`，自由组合基础对象和原子 Play 时使用 `team_query`。
 - `manage-roster`：球队与球员资料、启用状态和背号。
 - `manage-game-setup`：比赛安排、状态和阵容。
-- `record-game`：一次 `game.create` 录入已结束比赛、双方首发和连续 Play。
+- `record-game`：启动一次独立的、分块录入已结束比赛的内部会话。
 - `manage-training`：球员每日自训记录。
 
-Skill 中间件动态提供模型可见的 `skill` 工具；业务工具列表显式注册 `team_describe`、`team_fetch`、`team_query` 和 `team_modify`。各 Skill 均为自包含单文件，当前不使用引用文件或通用文件读取能力。
+Skill 中间件动态提供模型可见的 `skill` 工具；业务工具列表显式注册 `team_describe`、`team_fetch`、`team_query`、`team_modify` 和 `team_game_create`。`team_game_create` 默认从外层模型的 ToolInfos 隐藏，只有最近一次成功工具结果加载了 `record-game` Skill 时才向紧随的请求暴露其小参数 Schema；调用后再次隐藏。各 Skill 均为自包含单文件，当前不使用引用文件或通用文件读取能力。
+
+`team_game_create` 在外层只接受确认标记，随后同步运行独立的 `game_recording_session`。内部 Agent 只接收外层本轮开始前筛选出的全部用户文本，绝不继承助手消息、工具结果或 Tool Schema；其私有 intake 不持久化。内部 ToolInfos 随阶段只暴露 `team_game_begin`，再暴露 `team_game_append_plays` 与 `team_game_finalize`，完成后不再暴露比赛工具。begin 生成临时的两词 petname ID；append 按连续 Play 块累积；finalize 才一次调用既有比赛写服务。若运行结束前未 finalize 或出现错误，临时 intake 直接丢弃。
 
 ## 生命周期回调
 
-Runtime 同时提供 Agent、AgenticModel 和 Tool 生命周期回调。默认日志只记录组件、事件、名称以及消息或工具数量等元数据。
+Runtime 同时提供 Agent、AgenticModel 和 Tool 生命周期回调。日志会记录模型可见 reasoning 摘要与回答文本，以及每次工具调用的参数和结果预览；预览统一截断至 1600 rune。`team_game_create` 预览会剔除可能出现的完整 `record` 字段。`unsafe_debug_data` 仍是记录完整模型输入、输出和工具载荷的开关。
 
 `TurnTelemetry` 由会话服务为每个有效轮次创建并放入 Context。状态栏装饰器按模型请求保存最后一次 token usage，Tool 回调在工具开始时计数。轮次结束后，Telemetry 向 Runtime logger 写入 session ID、`completed`、`failed` 或 `cancelled` 状态、模型请求数、prompt/completion/total token 总数和工具调用数；失败与取消保留结束前已采集的指标。
 
-仅当 `agent.unsafe_debug_data=true`（或由 `BASETION_UNSAFE_DEBUG_DATA=true` 覆盖）时，回调才记录模型输入输出和工具完整载荷。logger 为空时使用丢弃输出的 logger，避免 nil 引用。
+仅当 `agent.unsafe_debug_data=true`（或由 `BASETION_UNSAFE_DEBUG_DATA=true` 覆盖）时，回调才记录模型输入输出和工具完整载荷。logger 为空时使用丢弃输出的 logger，避免 nil 引用。嵌套录入 Agent 复用同一 Context 的 `TurnTelemetry` 与 Trace，因此一次批量测试报告中的请求和 token 总数包含外层与内部会话，但当前不按两者拆分。
 
 批量测试可通过 Context 显式附加 `TurnTrace`。状态栏装饰器会为每次模型请求记录序号、该请求中 total token 最大的一份 token usage 快照、其中的 `cached_tokens` 与模型调用错误；不保存完整输入、临时状态栏或模型输出。普通运行未附加 Trace 时不会保留这些数据。Trace 由入口在轮次结束后写入测试 JSONL，不写入业务 Session、运行日志或 Telemetry 汇总。

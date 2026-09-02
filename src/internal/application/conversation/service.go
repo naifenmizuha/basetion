@@ -20,6 +20,20 @@ type Service struct {
 	callback  callbacks.Handler
 	telemetry TurnTelemetry
 	now       func() time.Time
+	turnScope TurnScope
+}
+
+// TurnScope supplies ephemeral resources shared by every tool call in one
+// agent run. It is intentionally not persisted with Session.
+type TurnScope interface {
+	Begin(context.Context) (context.Context, func())
+}
+
+// TurnMessageScope optionally receives the final per-turn input immediately
+// before the Agent starts. It supplies ephemeral context only; implementations
+// must not retain messages after the run ends.
+type TurnMessageScope interface {
+	WithMessages(context.Context, []*schema.AgenticMessage) context.Context
 }
 
 // TurnTelemetry brackets a valid conversation turn with runtime observability
@@ -27,6 +41,12 @@ type Service struct {
 type TurnTelemetry interface {
 	Start(context.Context, string) context.Context
 	Finish(context.Context, error)
+}
+
+// WithTurnScope installs an optional per-run resource scope.
+func (s *Service) WithTurnScope(scope TurnScope) *Service {
+	s.turnScope = scope
+	return s
 }
 
 // NewService creates the conversation application service.
@@ -71,6 +91,11 @@ func (s *Service) execute(ctx context.Context, gen *adk.AsyncGenerator[*adk.Type
 	if s.telemetry != nil {
 		runContext = s.telemetry.Start(ctx, sessionID)
 	}
+	if s.turnScope != nil {
+		var cleanup func()
+		runContext, cleanup = s.turnScope.Begin(runContext)
+		defer cleanup()
+	}
 	var outcome error
 	defer func() {
 		if s.telemetry != nil {
@@ -89,6 +114,9 @@ func (s *Service) execute(ctx context.Context, gen *adk.AsyncGenerator[*adk.Type
 
 	userMessage := schema.UserAgenticMessage(prompt)
 	input := append(cloneMessages(session.Messages), userMessage)
+	if scope, ok := s.turnScope.(TurnMessageScope); ok {
+		runContext = scope.WithMessages(runContext, input)
+	}
 	var options []adk.AgentRunOption
 	if s.callback != nil {
 		options = append(options, adk.WithCallbacks(s.callback))
@@ -124,12 +152,33 @@ func (s *Service) execute(ctx context.Context, gen *adk.AsyncGenerator[*adk.Type
 		return
 	}
 
-	session.Messages = append(input, generated...)
+	session.Messages = withoutGameCreateMessages(append(input, generated...))
 	session.UpdatedAt = s.now().UTC()
 	if err := s.store.Save(runContext, session); err != nil {
 		outcome = fmt.Errorf("save session: %w", err)
 		gen.Send(errorEvent(outcome))
 	}
+}
+
+// Complete game records are valid only during one write and must never become
+// durable conversation history. Other messages retain their original ordering.
+func withoutGameCreateMessages(messages []*schema.AgenticMessage) []*schema.AgenticMessage {
+	result := make([]*schema.AgenticMessage, 0, len(messages))
+	for _, message := range messages {
+		copyMessage := *message
+		copyMessage.ContentBlocks = make([]*schema.ContentBlock, 0, len(message.ContentBlocks))
+		for _, block := range message.ContentBlocks {
+			if (block.FunctionToolCall != nil && block.FunctionToolCall.Name == "team_game_create") ||
+				(block.FunctionToolResult != nil && block.FunctionToolResult.Name == "team_game_create") {
+				continue
+			}
+			copyMessage.ContentBlocks = append(copyMessage.ContentBlocks, block)
+		}
+		if len(copyMessage.ContentBlocks) > 0 {
+			result = append(result, &copyMessage)
+		}
+	}
+	return result
 }
 
 func splitEvent(event *adk.TypedAgentEvent[*schema.AgenticMessage]) (*adk.TypedAgentEvent[*schema.AgenticMessage], *schema.AgenticMessage, error) {

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -17,16 +18,21 @@ class EvaluationInputError(ValueError):
     """Raised when the input does not follow the batch-test JSONL protocol."""
 
 
+RFC3339_PATTERN = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+)
+
+
 def parse_timestamp(value: Any, field: str, line_number: int) -> datetime:
     if not isinstance(value, str) or not value:
         raise EvaluationInputError(f"第 {line_number} 行的 {field} 必须是非空 RFC3339 时间")
+    if RFC3339_PATTERN.fullmatch(value) is None:
+        raise EvaluationInputError(f"第 {line_number} 行的 {field} 无法解析: {value!r}")
     normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
-    for pattern in ("%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z"):
-        try:
-            return datetime.strptime(normalized, pattern)
-        except ValueError:
-            continue
-    raise EvaluationInputError(f"第 {line_number} 行的 {field} 无法解析: {value!r}")
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError as error:
+        raise EvaluationInputError(f"第 {line_number} 行的 {field} 无法解析: {value!r}") from error
 
 
 def require_string(record: dict[str, Any], field: str, line_number: int) -> str:

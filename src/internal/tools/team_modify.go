@@ -230,11 +230,6 @@ func (h *teamModifyHandler) executeBatch(ctx context.Context, requests []teamMod
 		result, err := h.execute(ctx, request.Operation, request.Arguments)
 		if err == nil {
 			output.Results = append(output.Results, teamModifyResult{Index: index, Key: request.Key, Operation: request.Operation, Status: "succeeded", Result: result})
-			if len(requests) == 1 && request.Operation == "game.create" {
-				if progress, ok := result.(game.GameCreateProgress); ok && progress.Status == "succeeded" {
-					output.ContextReceipt = &toolContextReceipt{Kind: "completed_write", Operation: request.Operation, Summary: fmt.Sprintf("已记录 %s（主）对 %s（客）的比赛；已创建 %d 套阵容和 %d 个 Play。", progress.HomeTeamName, progress.AwayTeamName, progress.CompletedLineups, progress.CompletedPlays)}
-				}
-			}
 			continue
 		}
 		reason := err.Error()
@@ -300,7 +295,7 @@ func (h *teamModifyHandler) describeGroup(group string) modifyTopicDescription {
 	return modifyTopicDescription{Name: group, Kind: "group", Found: true, Summary: group + " 数据修改操作。", Children: children}
 }
 
-var modifyOperationOrder = []string{"team.create", "player.create", "player.update", "player.set_active", "player.change_jersey", "game.create", "match.create", "match.update", "match.set_status", "match.delete", "lineup.create", "lineup.replace", "lineup.delete", "training.create", "training.update", "training.delete"}
+var modifyOperationOrder = []string{"team.create", "player.create", "player.update", "player.set_active", "player.change_jersey", "match.create", "match.update", "match.set_status", "match.delete", "lineup.create", "lineup.replace", "lineup.delete", "training.create", "training.update", "training.delete"}
 
 func defaultModifyOperations() map[string]modifyOperation {
 	hands := []string{"left", "right"}
@@ -312,7 +307,6 @@ func defaultModifyOperations() map[string]modifyOperation {
 		{Name: "positions", Type: "string[]", Required: true, Description: "守备位置。", Values: positions},
 	}
 	return map[string]modifyOperation{
-		"game.create":          {name: "game.create", group: "game", summary: "按球队名和背号的紧凑事件流创建一场包含双方首发及全部比赛过程的已结束比赛；服务端推导局面，不使用数据库事务。", parameters: compactGameCreateFields(), conventions: compactGameCreateConventions(), invariants: compactGameCreateInvariants(), resultType: "game_create_progress"},
 		"team.create":          {name: "team.create", group: "team", summary: "创建一个启用的球队。", parameters: []modifyFieldDescription{{Name: "name", Type: "string", Required: true, Description: "球队名称。"}}, resultType: "team"},
 		"player.create":        {name: "player.create", group: "player", summary: "创建一个归属球队的启用球员。", parameters: append([]modifyFieldDescription{{Name: "team_id", Type: "string", Required: true, Description: "所属球队 ID。"}, {Name: "jersey_number", Type: "integer", Required: true, Description: "0 到 99 的球衣号码。"}}, profile...), resultType: "player"},
 		"player.update":        {name: "player.update", group: "player", summary: "更新球员的完整资料。", parameters: append([]modifyFieldDescription{{Name: "player_id", Type: "string", Required: true, Description: "球员 ID。"}}, profile...), resultType: "player"},
@@ -595,8 +589,12 @@ func parseHands(values []string) (player.HandFlags, error) {
 
 func parsePositions(values []string) (player.PositionFlags, error) {
 	known := map[string]player.PositionFlags{"pitcher": player.PositionPitcher, "catcher": player.PositionCatcher, "first_base": player.PositionFirstBase, "second_base": player.PositionSecondBase, "shortstop": player.PositionShortstop, "third_base": player.PositionThirdBase, "outfielder": player.PositionOutfielder}
+	aliases := map[string]string{"p": "pitcher", "c": "catcher", "1b": "first_base", "2b": "second_base", "ss": "shortstop", "3b": "third_base", "of": "outfielder"}
 	var result player.PositionFlags
 	for _, value := range values {
+		if canonical, ok := aliases[strings.ToLower(value)]; ok {
+			value = canonical
+		}
 		flag, exists := known[value]
 		if !exists {
 			return 0, fmt.Errorf("unknown position %q", value)

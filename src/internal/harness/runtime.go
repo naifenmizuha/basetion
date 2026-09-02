@@ -51,6 +51,7 @@ func NewRuntime(
 		MaxIterations: cfg.Agent.MaxIterations,
 		Handlers: []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{
 			skillMiddleware,
+			newGameCreateVisibility(),
 		},
 		ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{
 			Tools: registeredTools,
